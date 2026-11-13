@@ -1,0 +1,435 @@
+import { jsPDF } from 'jspdf';
+import { EvidenceItem, ReportMetadata } from '../types/ekinerja';
+import { buildAnnualPages, F4Page, formatIndonesianDate } from './pdfLayout';
+
+const F4_HEIGHT_MM = 330;
+const MARGIN_X = 16;
+const MARGIN_TOP = 16;
+const MARGIN_BOTTOM = 14;
+
+function drawHeader(doc: jsPDF, metadata: ReportMetadata, pageWidth: number, subtitle: string) {
+  const contentWidth = pageWidth - MARGIN_X * 2;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text(
+    (metadata.reportTitle || 'Laporan Foto Bukti Dukung E-Kinerja Tahunan').toUpperCase(),
+    MARGIN_X,
+    MARGIN_TOP + 2
+  );
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(71, 85, 105);
+  const identityParts: string[] = [`Tahun Laporan: ${metadata.year}`];
+  if (metadata.employeeName.trim()) identityParts.push(metadata.employeeName.trim());
+  if (metadata.nip.trim()) identityParts.push(`NIP. ${metadata.nip.trim()}`);
+  if (metadata.unit.trim()) identityParts.push(metadata.unit.trim());
+
+  const headerLine = identityParts.join('  |  ');
+  const wrappedIdentity = doc.splitTextToSize(headerLine, contentWidth);
+  doc.text(wrappedIdentity[0] ?? '', MARGIN_X, MARGIN_TOP + 7);
+
+  // Subtle rule
+  doc.setDrawColor(15, 76, 129);
+  doc.setLineWidth(0.6);
+  doc.line(MARGIN_X, MARGIN_TOP + 10.5, pageWidth - MARGIN_X, MARGIN_TOP + 10.5);
+
+  // Section subtitle
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10.5);
+  doc.setTextColor(15, 76, 129);
+  doc.text(subtitle, MARGIN_X, MARGIN_TOP + 17);
+}
+
+function drawFooter(
+  doc: jsPDF,
+  metadata: ReportMetadata,
+  pageWidth: number,
+  pageNumber: number,
+  totalPages: number
+) {
+  const footerY = F4_HEIGHT_MM - MARGIN_BOTTOM + 4;
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.3);
+  doc.line(MARGIN_X, footerY - 5, pageWidth - MARGIN_X, footerY - 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text(
+    `Laporan E-Kinerja Tahun ${metadata.year} · Kertas F4 (${metadata.paperWidthMm} × 330 mm)`,
+    MARGIN_X,
+    footerY
+  );
+  doc.text(`Halaman ${pageNumber} dari ${totalPages}`, pageWidth - MARGIN_X, footerY, {
+    align: 'right',
+  });
+}
+
+function drawCoverPage(
+  doc: jsPDF,
+  metadata: ReportMetadata,
+  page: Extract<F4Page, { type: 'cover' }>
+) {
+  const pageWidth = metadata.paperWidthMm;
+  const contentWidth = pageWidth - MARGIN_X * 2;
+  let y = MARGIN_TOP + 8;
+
+  // Institutional top bar
+  doc.setFillColor(15, 76, 129);
+  doc.rect(MARGIN_X, y, contentWidth, 2.2, 'F');
+  y += 12;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(15, 76, 129);
+  doc.text('DOKUMEN ARSIP BUKTI DUKUNG KINERJA PEGAWAI', MARGIN_X, y);
+  y += 8;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.setTextColor(15, 23, 42);
+  const titleLines = doc.splitTextToSize(
+    metadata.reportTitle || 'Laporan Foto Bukti Dukung E-Kinerja Tahunan',
+    contentWidth
+  );
+  doc.text(titleLines, MARGIN_X, y);
+  y += titleLines.length * 7.5 + 2;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(51, 65, 85);
+  doc.text(`Periode Pelaporan: Januari – Desember ${metadata.year}`, MARGIN_X, y);
+  y += 10;
+
+  // Identity block box
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.35);
+  doc.rect(MARGIN_X, y, contentWidth, 36, 'FD');
+
+  const metaRows: Array<[string, string]> = [
+    ['Nama Pegawai', metadata.employeeName.trim() || '—'],
+    ['NIP / Identitas', metadata.nip.trim() || '—'],
+    ['Jabatan', metadata.position.trim() || '—'],
+    ['Unit Kerja / Instansi', metadata.unit.trim() || '—'],
+  ];
+
+  let rowY = y + 7.5;
+  metaRows.forEach(([label, value]) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    doc.text(label, MARGIN_X + 5, rowY);
+    doc.text(':', MARGIN_X + 46, rowY);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(15, 23, 42);
+    const valClip = doc.splitTextToSize(value, contentWidth - 56)[0] ?? '—';
+    doc.text(valClip, MARGIN_X + 50, rowY);
+    rowY += 7.5;
+  });
+
+  y += 45;
+
+  // Summary Table Header
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Rekapitulasi Bukti Dukung Bulanan (${page.totalPhotos} Foto)`, MARGIN_X, y);
+  y += 5;
+
+  // Table header bar
+  const col1W = 16;
+  const col2W = 72;
+  const col3W = 48;
+  const col4W = contentWidth - col1W - col2W - col3W;
+  const rowH = 9.2;
+
+  doc.setFillColor(15, 76, 129);
+  doc.rect(MARGIN_X, y, contentWidth, rowH, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text('No.', MARGIN_X + 4, y + 6);
+  doc.text('Bulan Pelaporan', MARGIN_X + col1W + 3, y + 6);
+  doc.text('Jumlah Bukti Foto', MARGIN_X + col1W + col2W + col3W - 4, y + 6, { align: 'right' });
+  doc.text('Halaman Dokumen', MARGIN_X + contentWidth - 4, y + 6, { align: 'right' });
+  y += rowH;
+
+  page.summaryRows.forEach((row, idx) => {
+    if (idx % 2 === 1) {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(MARGIN_X, y, contentWidth, rowH, 'F');
+    }
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.25);
+    doc.line(MARGIN_X, y + rowH, MARGIN_X + contentWidth, y + rowH);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    doc.text(String(idx + 1).padStart(2, '0'), MARGIN_X + 4, y + 6);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text(`${row.month.name} ${metadata.year}`, MARGIN_X + col1W + 3, y + 6);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(row.count > 0 ? 15 : 148, row.count > 0 ? 23 : 163, row.count > 0 ? 42 : 184);
+    doc.text(
+      row.count > 0 ? `${row.count} Foto` : 'Belum ada foto',
+      MARGIN_X + col1W + col2W + col3W - 4,
+      y + 6,
+      { align: 'right' }
+    );
+
+    doc.text(row.pageRangeLabel, MARGIN_X + contentWidth - 4, y + 6, { align: 'right' });
+    y += rowH;
+  });
+
+  // Table outer border
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.35);
+  doc.rect(MARGIN_X, y - rowH * 13, contentWidth, rowH * 13);
+
+  // Signature block at bottom of cover page
+  const sigY = Math.max(y + 16, F4_HEIGHT_MM - MARGIN_BOTTOM - 54);
+  const leftSigX = MARGIN_X + 4;
+  const rightSigX = MARGIN_X + contentWidth / 2 + 10;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(51, 65, 85);
+
+  if (metadata.supervisorName.trim()) {
+    doc.text('Mengetahui,', leftSigX, sigY);
+    doc.text('Pejabat Penilai Kinerja,', leftSigX, sigY + 5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text(metadata.supervisorName.trim(), leftSigX, sigY + 28);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    if (metadata.supervisorNip.trim()) {
+      doc.text(`NIP. ${metadata.supervisorNip.trim()}`, leftSigX, sigY + 33);
+    }
+  }
+
+  const cityPrefix = metadata.city.trim() ? `${metadata.city.trim()}, ` : '';
+  doc.setTextColor(51, 65, 85);
+  doc.text(`${cityPrefix}Desember ${metadata.year}`, rightSigX, sigY);
+  doc.text('Pegawai Yang Melaporkan,', rightSigX, sigY + 5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(metadata.employeeName.trim() || '( ........................................ )', rightSigX, sigY + 28);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  if (metadata.nip.trim()) {
+    doc.text(`NIP. ${metadata.nip.trim()}`, rightSigX, sigY + 33);
+  }
+
+  drawFooter(doc, metadata, pageWidth, page.pageNumber, page.totalPages);
+}
+
+function drawPhotoCard(
+  doc: jsPDF,
+  item: EvidenceItem,
+  indexNumber: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+) {
+  // Card border
+  doc.setDrawColor(203, 213, 225);
+  doc.setFillColor(255, 255, 255);
+  doc.setLineWidth(0.35);
+  doc.rect(x, y, w, h, 'FD');
+
+  const captionH = item.description?.trim() ? 22 : 16;
+  const imgPad = 3;
+  const imgBoxX = x + imgPad;
+  const imgBoxY = y + imgPad;
+  const imgBoxW = w - imgPad * 2;
+  const imgBoxH = h - captionH - imgPad * 2;
+
+  // Neutral image mat
+  doc.setFillColor(248, 250, 252);
+  doc.rect(imgBoxX, imgBoxY, imgBoxW, imgBoxH, 'F');
+
+  // Fit image inside imgBox preserving aspect ratio
+  const imgRatio = item.imageWidth / Math.max(1, item.imageHeight);
+  const boxRatio = imgBoxW / Math.max(1, imgBoxH);
+
+  let drawW = imgBoxW;
+  let drawH = imgBoxH;
+  if (imgRatio > boxRatio) {
+    drawW = imgBoxW;
+    drawH = imgBoxW / imgRatio;
+  } else {
+    drawH = imgBoxH;
+    drawW = imgBoxH * imgRatio;
+  }
+
+  const drawX = imgBoxX + (imgBoxW - drawW) / 2;
+  const drawY = imgBoxY + (imgBoxH - drawH) / 2;
+
+  try {
+    doc.addImage(item.imageDataUrl, 'JPEG', drawX, drawY, drawW, drawH, undefined, 'MEDIUM');
+  } catch {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.text('Gambar tidak dapat dirender', imgBoxX + imgBoxW / 2, imgBoxY + imgBoxH / 2, {
+      align: 'center',
+    });
+  }
+
+  // Divider above caption
+  const capTop = y + h - captionH;
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.25);
+  doc.line(x, capTop, x + w, capTop);
+
+  // Caption text
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(15, 23, 42);
+  const titleText = `${indexNumber}. ${item.title.trim() || 'Bukti Dukung E-Kinerja'}`;
+  const titleLines = doc.splitTextToSize(titleText, w - 6).slice(0, 2);
+  doc.text(titleLines, x + 3, capTop + 4.8);
+
+  const subParts: string[] = [];
+  if (item.date) subParts.push(formatIndonesianDate(item.date));
+  if (item.description?.trim()) subParts.push(item.description.trim());
+
+  if (subParts.length > 0) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    const descLine = doc.splitTextToSize(subParts.join(' · '), w - 6)[0] ?? '';
+    const descY = titleLines.length > 1 ? capTop + 14.5 : capTop + 10.5;
+    doc.text(descLine, x + 3, descY);
+  }
+}
+
+function drawMonthPhotosPage(
+  doc: jsPDF,
+  metadata: ReportMetadata,
+  page: Extract<F4Page, { type: 'month-photos' }>
+) {
+  const pageWidth = metadata.paperWidthMm;
+  const contentWidth = pageWidth - MARGIN_X * 2;
+  const monthSuffix =
+    page.monthTotalPages > 1 ? ` (Bagian ${page.monthPageIndex} dari ${page.monthTotalPages})` : '';
+  drawHeader(doc, metadata, pageWidth, `Bulan: ${page.month.name} ${metadata.year}${monthSuffix}`);
+
+  const gridTop = MARGIN_TOP + 22;
+  const gridBottom = F4_HEIGHT_MM - MARGIN_BOTTOM - 8;
+  const gridHeight = gridBottom - gridTop;
+
+  let cols = 2;
+  let rows = 2;
+  if (metadata.photosPerPage === 2) {
+    cols = 1;
+    rows = 2;
+  } else if (metadata.photosPerPage === 6) {
+    cols = 2;
+    rows = 3;
+  }
+
+  const gapX = 6;
+  const gapY = 6;
+  const cardW = (contentWidth - gapX * (cols - 1)) / cols;
+  const cardH = (gridHeight - gapY * (rows - 1)) / rows;
+
+  page.items.forEach((item, idx) => {
+    const col = idx % cols;
+    const row = Math.floor(idx / cols);
+    const x = MARGIN_X + col * (cardW + gapX);
+    const y = gridTop + row * (cardH + gapY);
+    drawPhotoCard(doc, item, page.startItemNumber + idx, x, y, cardW, cardH);
+  });
+
+  drawFooter(doc, metadata, pageWidth, page.pageNumber, page.totalPages);
+}
+
+function drawEmptyMonthPage(
+  doc: jsPDF,
+  metadata: ReportMetadata,
+  page: Extract<F4Page, { type: 'month-empty' }>
+) {
+  const pageWidth = metadata.paperWidthMm;
+  const contentWidth = pageWidth - MARGIN_X * 2;
+  drawHeader(doc, metadata, pageWidth, `Bulan: ${page.month.name} ${metadata.year}`);
+
+  const boxY = MARGIN_TOP + 34;
+  doc.setDrawColor(203, 213, 225);
+  doc.setFillColor(248, 250, 252);
+  doc.rect(MARGIN_X, boxY, contentWidth, 64, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Tidak Ada Dokumentasi Foto pada Bulan ${page.month.name} ${metadata.year}`, pageWidth / 2, boxY + 28, {
+    align: 'center',
+  });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(148, 163, 184);
+  doc.text('Belum terdapat bukti dukung foto yang dilampirkan untuk periode bulan ini.', pageWidth / 2, boxY + 36, {
+    align: 'center',
+  });
+
+  drawFooter(doc, metadata, pageWidth, page.pageNumber, page.totalPages);
+}
+
+export async function generateAndDownloadAnnualPdf(
+  metadata: ReportMetadata,
+  items: EvidenceItem[],
+  onProgress?: (current: number, total: number) => void
+): Promise<{ fileName: string; totalPages: number }> {
+  const pages = buildAnnualPages(metadata, items);
+  if (pages.length === 0) {
+    throw new Error('Tidak ada halaman untuk diekspor. Tambahkan minimal satu foto bukti dukung atau aktifkan halaman sampul.');
+  }
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: [metadata.paperWidthMm, F4_HEIGHT_MM],
+    compress: true,
+  });
+
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
+    if (i > 0) {
+      doc.addPage([metadata.paperWidthMm, F4_HEIGHT_MM], 'portrait');
+    }
+
+    if (page.type === 'cover') {
+      drawCoverPage(doc, metadata, page);
+    } else if (page.type === 'month-photos') {
+      drawMonthPhotosPage(doc, metadata, page);
+    } else {
+      drawEmptyMonthPage(doc, metadata, page);
+    }
+
+    onProgress?.(i + 1, pages.length);
+    // Yield to browser event loop between pages for smooth UI progress
+    await new Promise((r) => setTimeout(r, 8));
+  }
+
+  const cleanName = metadata.employeeName
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const fileName = cleanName
+    ? `Laporan_EKinerja_F4_${metadata.year}_${cleanName}.pdf`
+    : `Laporan_EKinerja_F4_${metadata.year}.pdf`;
+
+  doc.save(fileName);
+  return { fileName, totalPages: pages.length };
+}

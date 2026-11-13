@@ -1,0 +1,6 @@
+{
+  "name": "E-Kinerja F4 — Laporan Foto Tahunan",
+  "description": "Aplikasi penyusun kumpulan foto bukti dukung E-Kinerja tahunan (Januari–Desember) dengan pratinjau dokumen dan unduh otomatis PDF ukuran kertas F4.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
