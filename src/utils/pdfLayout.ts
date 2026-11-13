@@ -136,3 +136,7 @@ export function formatIndonesianDate(dateStr?: string): string {
   const monthName = MONTHS[parsed.getMonth()]?.name ?? '';
   return `${parsed.getDate()} ${monthName} ${parsed.getFullYear()}`;
 }
+
+export function getEndOfDecemberDateLabel(year: number): string {
+  return `31 Desember ${year}`;
+}

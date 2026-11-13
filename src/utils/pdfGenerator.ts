@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { EvidenceItem, ReportMetadata } from '../types/ekinerja';
-import { buildAnnualPages, F4Page, formatIndonesianDate } from './pdfLayout';
+import { buildAnnualPages, F4Page, formatIndonesianDate, getEndOfDecemberDateLabel } from './pdfLayout';
 
 const F4_HEIGHT_MM = 330;
 const MARGIN_X = 16;
@@ -219,7 +219,7 @@ function drawCoverPage(
 
   const cityPrefix = metadata.city.trim() ? `${metadata.city.trim()}, ` : '';
   doc.setTextColor(51, 65, 85);
-  doc.text(`${cityPrefix}Desember ${metadata.year}`, rightSigX, sigY);
+  doc.text(`${cityPrefix}${getEndOfDecemberDateLabel(metadata.year)}`, rightSigX, sigY);
   doc.text('Pegawai Yang Melaporkan,', rightSigX, sigY + 5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);

@@ -277,10 +277,10 @@ export function ReportSettings({
       <section className="rounded-xl border border-slate-200 bg-white p-6 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="font-display text-base font-semibold text-slate-900">
-            Pengelolaan Data Lokal
+            Pengelolaan Data Database (MySQL)
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Saat ini tersimpan <span className="font-mono tabular-nums font-semibold">{totalPhotos}</span> foto bukti dukung di penyimpanan peramban.
+            Saat ini tersimpan <span className="font-mono tabular-nums font-semibold">{totalPhotos}</span> foto bukti dukung di database MySQL (<code className="font-mono text-slate-700">laporan_ekin_tahunan</code>).
           </p>
         </div>
 
@@ -290,7 +290,7 @@ export function ReportSettings({
             onClick={onLoadSampleData}
             className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors"
           >
-            Muat Contoh 12 Bulan
+            Muat Identitas Laporan &amp; Pegawai
           </button>
 
           {confirmReset ? (

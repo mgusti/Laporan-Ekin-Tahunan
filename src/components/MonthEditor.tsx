@@ -24,8 +24,6 @@ interface MonthEditorProps {
   onDeleteItem: (id: string) => void;
   onMoveItemOrder: (id: string, direction: 'up' | 'down') => void;
   onMoveItemMonth: (id: string, targetMonth: number) => void;
-  onLoadSampleData?: () => void;
-  totalAnnualItems: number;
 }
 
 export function MonthEditor({
@@ -38,8 +36,6 @@ export function MonthEditor({
   onDeleteItem,
   onMoveItemOrder,
   onMoveItemMonth,
-  onLoadSampleData,
-  totalAnnualItems,
 }: MonthEditorProps) {
   const currentMonth = MONTHS.find((m) => m.index === monthIndex) ?? MONTHS[0];
 
@@ -419,17 +415,6 @@ export function MonthEditor({
             <p className="mt-1 text-xs text-slate-500 max-w-md mx-auto">
               Unggah foto kegiatan di formulir atas atau seret beberapa gambar sekaligus ke area unggah.
             </p>
-            {totalAnnualItems === 0 && onLoadSampleData && (
-              <div className="mt-5">
-                <button
-                  type="button"
-                  onClick={onLoadSampleData}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors"
-                >
-                  <span>Muat Contoh Laporan 12 Bulan ({year})</span>
-                </button>
-              </div>
-            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

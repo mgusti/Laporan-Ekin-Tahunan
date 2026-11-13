@@ -16,7 +16,7 @@ import { generateAndDownloadAnnualPdf } from './utils/pdfGenerator';
 import { buildAnnualPages, groupItemsByMonth } from './utils/pdfLayout';
 import {
   clearReportState,
-  createSampleAnnualReport,
+  getEmployeeIdentityMetadata,
   loadReportState,
   saveReportState,
 } from './utils/storage';
@@ -174,11 +174,17 @@ export default function App() {
   }, []);
 
   const handleLoadSampleData = useCallback(() => {
-    const sample = createSampleAnnualReport(state.metadata.year);
-    setState(sample);
+    const identityMetadata = getEmployeeIdentityMetadata(state.metadata.year);
+    setState((prev) => ({
+      ...prev,
+      metadata: {
+        ...prev.metadata,
+        ...identityMetadata,
+      },
+    }));
     setNotice({
       type: 'success',
-      message: `Contoh laporan 12 bulan untuk tahun ${state.metadata.year} berhasil dimuat.`,
+      message: 'Identitas laporan & pegawai berhasil dimuat.',
     });
   }, [state.metadata.year]);
 
@@ -310,8 +316,6 @@ export default function App() {
               onDeleteItem={handleDeleteItem}
               onMoveItemOrder={handleMoveItemOrder}
               onMoveItemMonth={handleMoveItemMonth}
-              onLoadSampleData={handleLoadSampleData}
-              totalAnnualItems={state.items.length}
             />
           )}
 

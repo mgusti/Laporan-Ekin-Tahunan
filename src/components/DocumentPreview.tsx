@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Download, Loader2, ZoomIn, ZoomOut } from 'lucide-react';
 import { EvidenceItem, MONTHS, PhotosPerPage, ReportMetadata } from '../types/ekinerja';
-import { buildAnnualPages, F4Page, formatIndonesianDate } from '../utils/pdfLayout';
+import { buildAnnualPages, F4Page, formatIndonesianDate, getEndOfDecemberDateLabel } from '../utils/pdfLayout';
 
 interface DocumentPreviewProps {
   metadata: ReportMetadata;
@@ -221,7 +221,7 @@ export function DocumentPreview({
         </div>
         <div>
           <div className="text-slate-600">
-            {metadata.city.trim() ? `${metadata.city.trim()}, ` : ''}Desember {metadata.year}
+            {metadata.city.trim() ? `${metadata.city.trim()}, ` : ''}{getEndOfDecemberDateLabel(metadata.year)}
           </div>
           <div className="text-slate-600">Pegawai Yang Melaporkan,</div>
           <div style={{ height: `${38 * zoom}px` }} />
