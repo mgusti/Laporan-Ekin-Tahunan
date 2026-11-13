@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import type { IncomingMessage, ServerResponse } from 'http';
 import mysql from 'mysql2/promise';
 import type { Plugin } from 'vite';
