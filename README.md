@@ -26,9 +26,9 @@ MYSQL_PASSWORD=
 MYSQL_DATABASE=laporan_ekin_tahunan
 ```
 
-> **Catatan:** Database `laporan_ekin_tahunan` beserta tabel `report_metadata` dan `evidence_items` akan **dibuat secara otomatis** saat server aplikasi dijalankan pertama kali. Anda juga dapat mengimpor skema secara manual melalui berkas `database.sql` jika diperlukan:
+> **Catatan:** Database `laporan_ekin_tahunan` beserta tabel `report_metadata` dan `evidence_items` akan **dibuat secara otomatis** saat server aplikasi dijalankan pertama kali. Anda juga dapat mengimpor skema secara manual melalui berkas `laporan_ekin_tahunan.sql` jika diperlukan:
 > ```powershell
-> Get-Content .\database.sql -Raw | C:\wamp64\bin\mysql\mysql8.4.7\bin\mysql.exe -u root
+> Get-Content .\laporan_ekin_tahunan.sql -Raw | C:\wamp64\bin\mysql\mysql8.4.7\bin\mysql.exe -u root
 > ```
 
 ### 3. Instal Dependensi
