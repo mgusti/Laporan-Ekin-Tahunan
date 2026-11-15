@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS `report_metadata` (
   `supervisor_name` VARCHAR(255) NOT NULL DEFAULT '',
   `supervisor_nip` VARCHAR(100) NOT NULL DEFAULT '',
   `city` VARCHAR(100) NOT NULL DEFAULT 'Jambi',
+  `indicators` TEXT NULL,
+  `selected_indicator` VARCHAR(500) NOT NULL DEFAULT 'Permintaan perbaikan perangkat keras/jaringan',
   `include_cover_page` TINYINT(1) NOT NULL DEFAULT 1,
   `include_empty_months` TINYINT(1) NOT NULL DEFAULT 0,
   `photos_per_page` INT NOT NULL DEFAULT 4,
@@ -24,18 +26,20 @@ CREATE TABLE IF NOT EXISTS `report_metadata` (
 
 INSERT IGNORE INTO `report_metadata` (
   `id`, `year`, `report_title`, `employee_name`, `nip`, `position`, `unit`,
-  `supervisor_name`, `supervisor_nip`, `city`, `include_cover_page`,
-  `include_empty_months`, `photos_per_page`, `paper_width_mm`
+  `supervisor_name`, `supervisor_nip`, `city`, `indicators`, `selected_indicator`,
+  `include_cover_page`, `include_empty_months`, `photos_per_page`, `paper_width_mm`
 ) VALUES (
   1, 2026, 'Laporan Foto Bukti Dukung E-Kinerja Tahunan',
   'Muhammad Gusti Kurniawan, S.Kom', '199308262025211037',
   'Penata Layanan Operasional', 'RSUD H. Abdul Manap Kota Jambi',
-  '', '', 'Jambi', 1, 0, 4, 215
+  '', '', 'Jambi', '["Permintaan perbaikan perangkat keras/jaringan"]',
+  'Permintaan perbaikan perangkat keras/jaringan', 1, 0, 4, 215
 );
 
 CREATE TABLE IF NOT EXISTS `evidence_items` (
   `id` VARCHAR(100) NOT NULL PRIMARY KEY,
   `month` TINYINT NOT NULL,
+  `indicator` VARCHAR(500) NOT NULL DEFAULT 'Permintaan perbaikan perangkat keras/jaringan',
   `title` VARCHAR(500) NOT NULL,
   `description` TEXT NULL,
   `date` VARCHAR(20) NULL,

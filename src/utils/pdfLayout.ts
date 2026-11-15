@@ -1,4 +1,18 @@
-import { EvidenceItem, MONTHS, MonthDefinition, ReportMetadata } from '../types/ekinerja';
+import {
+  DEFAULT_INDICATOR,
+  EvidenceItem,
+  MONTHS,
+  MonthDefinition,
+  ReportMetadata,
+} from '../types/ekinerja';
+
+export function filterItemsByIndicator(
+  items: EvidenceItem[],
+  selectedIndicator: string
+): EvidenceItem[] {
+  const target = (selectedIndicator ?? '').trim() || DEFAULT_INDICATOR;
+  return items.filter((item) => ((item.indicator ?? '').trim() || DEFAULT_INDICATOR) === target);
+}
 
 export interface CoverSummaryRow {
   month: MonthDefinition;
@@ -54,7 +68,8 @@ type RawMonthPage =
   | Omit<Extract<F4Page, { type: 'month-empty' }>, 'pageNumber' | 'totalPages'>;
 
 export function buildAnnualPages(metadata: ReportMetadata, items: EvidenceItem[]): F4Page[] {
-  const grouped = groupItemsByMonth(items);
+  const filteredItems = filterItemsByIndicator(items, metadata.selectedIndicator);
+  const grouped = groupItemsByMonth(filteredItems);
   const rawPages: RawMonthPage[] = [];
   const monthPageRanges = new Map<number, { start: number; end: number }>();
 
@@ -113,7 +128,7 @@ export function buildAnnualPages(metadata: ReportMetadata, items: EvidenceItem[]
       pageNumber: 1,
       totalPages: Math.max(1, totalPages),
       summaryRows,
-      totalPhotos: items.length,
+      totalPhotos: filteredItems.length,
     });
   }
 

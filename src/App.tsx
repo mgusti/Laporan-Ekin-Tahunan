@@ -6,6 +6,7 @@ import { MonthSidebar } from './components/MonthSidebar';
 import { ReportSettings } from './components/ReportSettings';
 import { TopBar, WorkspaceTab } from './components/TopBar';
 import {
+  DEFAULT_INDICATOR,
   DEFAULT_METADATA,
   EvidenceItem,
   MONTHS,
@@ -13,7 +14,11 @@ import {
   ReportState,
 } from './types/ekinerja';
 import { generateAndDownloadAnnualPdf } from './utils/pdfGenerator';
-import { buildAnnualPages, groupItemsByMonth } from './utils/pdfLayout';
+import {
+  buildAnnualPages,
+  filterItemsByIndicator,
+  groupItemsByMonth,
+} from './utils/pdfLayout';
 import {
   clearReportState,
   getEmployeeIdentityMetadata,
@@ -67,28 +72,143 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  const groupedByMonth = useMemo(() => groupItemsByMonth(state.items), [state.items]);
+  const selectedIndicatorItems = useMemo(
+    () => filterItemsByIndicator(state.items, state.metadata.selectedIndicator),
+    [state.items, state.metadata.selectedIndicator]
+  );
+
+  const groupedByMonthAll = useMemo(() => groupItemsByMonth(state.items), [state.items]);
+  const groupedByMonthIndicator = useMemo(
+    () => groupItemsByMonth(selectedIndicatorItems),
+    [selectedIndicatorItems]
+  );
 
   const monthCounts = useMemo(() => {
     const map = new Map<number, number>();
     for (const m of MONTHS) {
-      map.set(m.index, (groupedByMonth.get(m.index) ?? []).length);
+      map.set(m.index, (groupedByMonthIndicator.get(m.index) ?? []).length);
     }
     return map;
-  }, [groupedByMonth]);
+  }, [groupedByMonthIndicator]);
 
   const annualPages = useMemo(
     () => buildAnnualPages(state.metadata, state.items),
     [state.metadata, state.items]
   );
 
-  const selectedMonthItems = groupedByMonth.get(selectedMonth) ?? [];
+  const selectedMonthItems = groupedByMonthAll.get(selectedMonth) ?? [];
 
   const handleUpdateMetadata = useCallback((patch: Partial<ReportMetadata>) => {
     setState((prev) => ({
       ...prev,
       metadata: { ...prev.metadata, ...patch },
     }));
+  }, []);
+
+  const handleAddIndicator = useCallback((newIndicatorRaw: string) => {
+    const trimmed = newIndicatorRaw.trim();
+    if (!trimmed) return;
+    setState((prev) => {
+      const exists = prev.metadata.indicators.includes(trimmed);
+      const nextIndicators = exists
+        ? prev.metadata.indicators
+        : [...prev.metadata.indicators, trimmed];
+      return {
+        ...prev,
+        metadata: {
+          ...prev.metadata,
+          indicators: nextIndicators,
+          selectedIndicator: trimmed,
+        },
+      };
+    });
+    setNotice({
+      type: 'success',
+      message: `Indikator kinerja "${trimmed}" berhasil dipilih.`,
+    });
+  }, []);
+
+  const handleEditIndicator = useCallback((oldIndicator: string, newIndicatorRaw: string) => {
+    const trimmed = newIndicatorRaw.trim();
+    if (!trimmed) return;
+    setState((prev) => {
+      const nextIndicators = prev.metadata.indicators.map((ind) =>
+        ind === oldIndicator ? trimmed : ind
+      );
+      const nextSelected =
+        prev.metadata.selectedIndicator === oldIndicator
+          ? trimmed
+          : prev.metadata.selectedIndicator;
+      return {
+        ...prev,
+        metadata: {
+          ...prev.metadata,
+          indicators: nextIndicators,
+          selectedIndicator: nextSelected,
+        },
+        items: prev.items.map((item) =>
+          ((item.indicator ?? '').trim() || DEFAULT_INDICATOR) === oldIndicator
+            ? { ...item, indicator: trimmed }
+            : item
+        ),
+      };
+    });
+    setNotice({
+      type: 'success',
+      message: `Indikator kinerja berhasil diubah menjadi "${trimmed}".`,
+    });
+  }, []);
+
+  const handleDeleteIndicator = useCallback((targetIndicator: string) => {
+    setState((prev) => {
+      if (prev.metadata.selectedIndicator === targetIndicator) {
+        return prev;
+      }
+      const nextIndicators = prev.metadata.indicators.filter((ind) => ind !== targetIndicator);
+      if (nextIndicators.length === 0) {
+        nextIndicators.push(prev.metadata.selectedIndicator || DEFAULT_INDICATOR);
+      }
+      const fallbackIndicator = prev.metadata.selectedIndicator || nextIndicators[0];
+
+      return {
+        ...prev,
+        metadata: {
+          ...prev.metadata,
+          indicators: nextIndicators,
+        },
+        items: prev.items.map((item) =>
+          ((item.indicator ?? '').trim() || DEFAULT_INDICATOR) === targetIndicator
+            ? { ...item, indicator: fallbackIndicator }
+            : item
+        ),
+      };
+    });
+    setNotice({
+      type: 'success',
+      message: `Indikator kinerja "${targetIndicator}" telah dihapus.`,
+    });
+  }, []);
+
+  const handleDeleteAllOtherIndicators = useCallback(() => {
+    setState((prev) => {
+      const activeInd = prev.metadata.selectedIndicator || DEFAULT_INDICATOR;
+      return {
+        ...prev,
+        metadata: {
+          ...prev.metadata,
+          indicators: [activeInd],
+          selectedIndicator: activeInd,
+        },
+        items: prev.items.map((item) => ({
+          ...item,
+          indicator: activeInd,
+        })),
+      };
+    });
+    setNotice({
+      type: 'success',
+      message: 'Semua indikator lain telah dihapus, menyisakan indikator yang aktif dicetak.',
+    });
   }, []);
 
   const handleAddItems = useCallback(
@@ -102,6 +222,8 @@ export default function App() {
         const now = Date.now();
         const created: EvidenceItem[] = newEntries.map((entry, idx) => ({
           ...entry,
+          indicator:
+            entry.indicator?.trim() || prev.metadata.selectedIndicator || DEFAULT_INDICATOR,
           id: `ev-${now}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
           order: nextOrder + idx,
           createdAt: now + idx,
@@ -133,8 +255,13 @@ export default function App() {
     setState((prev) => {
       const target = prev.items.find((i) => i.id === id);
       if (!target) return prev;
+      const targetInd = (target.indicator ?? '').trim() || DEFAULT_INDICATOR;
       const siblings = prev.items
-        .filter((i) => i.month === target.month)
+        .filter(
+          (i) =>
+            i.month === target.month &&
+            ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === targetInd
+        )
         .sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
 
       const idx = siblings.findIndex((i) => i.id === id);
@@ -214,7 +341,7 @@ export default function App() {
       );
       setNotice({
         type: 'success',
-        message: `Berhasil mengunduh ${result.fileName} (${result.totalPages} halaman F4).`,
+        message: `Berhasil mengunduh ${result.fileName} (${result.totalPages} halaman F4 · Indikator: ${state.metadata.selectedIndicator}).`,
       });
     } catch (err) {
       setNotice({
@@ -238,7 +365,7 @@ export default function App() {
           <div className="h-9 w-36 rounded-lg bg-slate-200 animate-pulse" />
         </div>
         <div className="flex-1 flex">
-          <div className="hidden lg:block w-[272px] border-r border-slate-200 bg-white p-4 space-y-3">
+          <div className="hidden lg:block w-[288px] border-r border-slate-200 bg-white p-4 space-y-3">
             <div className="h-14 rounded-lg bg-slate-100 animate-pulse" />
             <div className="h-96 rounded-lg bg-slate-100 animate-pulse" />
           </div>
@@ -295,10 +422,17 @@ export default function App() {
           <MonthSidebar
             year={state.metadata.year}
             onYearChange={(year) => handleUpdateMetadata({ year })}
+            indicators={state.metadata.indicators}
+            selectedIndicator={state.metadata.selectedIndicator}
+            onSelectIndicator={(selectedIndicator) =>
+              handleUpdateMetadata({ selectedIndicator })
+            }
+            onAddIndicator={handleAddIndicator}
             selectedMonth={selectedMonth}
             onSelectMonth={setSelectedMonth}
             monthCounts={monthCounts}
-            totalPhotos={state.items.length}
+            totalPhotos={selectedIndicatorItems.length}
+            totalAllIndicatorPhotos={state.items.length}
             totalPages={annualPages.length}
             paperWidthMm={state.metadata.paperWidthMm}
           />
@@ -309,6 +443,12 @@ export default function App() {
             <MonthEditor
               year={state.metadata.year}
               monthIndex={selectedMonth}
+              indicators={state.metadata.indicators}
+              selectedIndicator={state.metadata.selectedIndicator}
+              onSelectIndicator={(selectedIndicator) =>
+                handleUpdateMetadata({ selectedIndicator })
+              }
+              onAddIndicator={handleAddIndicator}
               items={selectedMonthItems}
               onSelectMonth={setSelectedMonth}
               onAddItems={handleAddItems}
@@ -322,7 +462,12 @@ export default function App() {
           {activeTab === 'settings' && (
             <ReportSettings
               metadata={state.metadata}
+              items={state.items}
               onChangeMetadata={handleUpdateMetadata}
+              onAddIndicator={handleAddIndicator}
+              onEditIndicator={handleEditIndicator}
+              onDeleteIndicator={handleDeleteIndicator}
+              onDeleteAllOtherIndicators={handleDeleteAllOtherIndicators}
               onLoadSampleData={handleLoadSampleData}
               onResetAllData={handleResetAllData}
               totalPhotos={state.items.length}
@@ -333,6 +478,9 @@ export default function App() {
             <DocumentPreview
               metadata={state.metadata}
               items={state.items}
+              onChangeSelectedIndicator={(selectedIndicator) =>
+                handleUpdateMetadata({ selectedIndicator })
+              }
               onChangePhotosPerPage={(photosPerPage) =>
                 handleUpdateMetadata({ photosPerPage })
               }

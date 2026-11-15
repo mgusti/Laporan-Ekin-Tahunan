@@ -1,11 +1,18 @@
 import { useMemo, useState } from 'react';
 import { Download, Loader2, ZoomIn, ZoomOut } from 'lucide-react';
 import { EvidenceItem, MONTHS, PhotosPerPage, ReportMetadata } from '../types/ekinerja';
-import { buildAnnualPages, F4Page, formatIndonesianDate, getEndOfDecemberDateLabel } from '../utils/pdfLayout';
+import {
+  buildAnnualPages,
+  F4Page,
+  filterItemsByIndicator,
+  formatIndonesianDate,
+  getEndOfDecemberDateLabel,
+} from '../utils/pdfLayout';
 
 interface DocumentPreviewProps {
   metadata: ReportMetadata;
   items: EvidenceItem[];
+  onChangeSelectedIndicator: (indicator: string) => void;
   onChangePhotosPerPage: (count: PhotosPerPage) => void;
   onDownloadPdf: () => void;
   isExporting: boolean;
@@ -15,6 +22,7 @@ interface DocumentPreviewProps {
 export function DocumentPreview({
   metadata,
   items,
+  onChangeSelectedIndicator,
   onChangePhotosPerPage,
   onDownloadPdf,
   isExporting,
@@ -23,6 +31,10 @@ export function DocumentPreview({
   const [zoom, setZoom] = useState<number>(0.78);
   const [filterTarget, setFilterTarget] = useState<string>('all');
 
+  const indicatorItems = useMemo(
+    () => filterItemsByIndicator(items, metadata.selectedIndicator),
+    [items, metadata.selectedIndicator]
+  );
   const allPages = useMemo(() => buildAnnualPages(metadata, items), [metadata, items]);
 
   const visiblePages = useMemo(() => {
@@ -68,10 +80,13 @@ export function DocumentPreview({
         }}
       />
       <div
-        className="font-bold text-[#0F4C81]"
-        style={{ fontSize: `${12 * zoom}px` }}
+        className="font-bold text-[#0F4C81] truncate"
+        style={{ fontSize: `${11.5 * zoom}px` }}
       >
         {subtitle}
+        {metadata.selectedIndicator.trim()
+          ? `  ·  Indikator: ${metadata.selectedIndicator.trim()}`
+          : ''}
       </div>
     </div>
   );
@@ -138,6 +153,7 @@ export function DocumentPreview({
           ['NIP / Identitas', metadata.nip.trim() || '—'],
           ['Jabatan', metadata.position.trim() || '—'],
           ['Unit Kerja / Instansi', metadata.unit.trim() || '—'],
+          ['Indikator Kinerja', metadata.selectedIndicator.trim() || '—'],
         ].map(([label, val]) => (
           <div
             key={label}
@@ -345,10 +361,32 @@ export function DocumentPreview({
             F4 ({metadata.paperWidthMm} × 330 mm)
           </span>
           <span aria-hidden="true">·</span>
-          <span className="font-mono tabular-nums">{items.length} Foto</span>
+          <span className="font-mono tabular-nums">{indicatorItems.length} Foto</span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* Indicator selector for printing */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-slate-600 whitespace-nowrap">
+              Indikator Cetak:
+            </span>
+            <select
+              aria-label="Pilih Indikator Kinerja yang dicetak"
+              value={metadata.selectedIndicator}
+              onChange={(e) => onChangeSelectedIndicator(e.target.value)}
+              className="max-w-[260px] rounded-lg border border-sky-700/40 bg-sky-50/60 px-2.5 py-1.5 text-xs font-semibold text-sky-950 focus:border-sky-700 focus:outline-none"
+            >
+              {metadata.indicators.map((ind) => {
+                const count = filterItemsByIndicator(items, ind).length;
+                return (
+                  <option key={ind} value={ind}>
+                    {ind} ({count} foto)
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
           {/* Month jump filter */}
           <select
             aria-label="Filter halaman pratinjau"

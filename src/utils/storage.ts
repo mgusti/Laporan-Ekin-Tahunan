@@ -1,4 +1,10 @@
-import { DEFAULT_METADATA, EvidenceItem, ReportMetadata, ReportState } from '../types/ekinerja';
+import {
+  DEFAULT_INDICATOR,
+  DEFAULT_METADATA,
+  EvidenceItem,
+  ReportMetadata,
+  ReportState,
+} from '../types/ekinerja';
 
 const DB_NAME = 'ekinerja_f4_annual_db';
 const DB_VERSION = 1;
@@ -62,10 +68,36 @@ export async function loadReportState(): Promise<ReportState> {
       items: EvidenceItem[];
     };
 
-    const items = Array.isArray(data.items) ? data.items : [];
-    const metadata = data.metadata
+    const rawItems = Array.isArray(data.items) ? data.items : [];
+    const baseMetadata = data.metadata
       ? { ...DEFAULT_METADATA, ...data.metadata }
       : { ...DEFAULT_METADATA };
+
+    const indicators =
+      Array.isArray(baseMetadata.indicators) && baseMetadata.indicators.length > 0
+        ? baseMetadata.indicators.map((x) => String(x).trim()).filter(Boolean)
+        : [DEFAULT_INDICATOR];
+
+    const items = rawItems.map((item) => {
+      const ind = (item.indicator ?? '').trim() || indicators[0] || DEFAULT_INDICATOR;
+      if (!indicators.includes(ind)) {
+        indicators.push(ind);
+      }
+      return {
+        ...item,
+        indicator: ind,
+      };
+    });
+
+    const selectedIndicator = indicators.includes(baseMetadata.selectedIndicator)
+      ? baseMetadata.selectedIndicator
+      : indicators[0] || DEFAULT_INDICATOR;
+
+    const metadata: ReportMetadata = {
+      ...baseMetadata,
+      indicators,
+      selectedIndicator,
+    };
 
     // If MySQL has no evidence items yet, check if browser IndexedDB has existing items to migrate
     if (items.length === 0) {

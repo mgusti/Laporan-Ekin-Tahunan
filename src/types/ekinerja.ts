@@ -19,9 +19,35 @@ export const MONTHS: MonthDefinition[] = [
   { index: 12, name: 'Desember', shortName: 'Des' },
 ];
 
+export const DEFAULT_INDICATOR = 'Permintaan perbaikan perangkat keras/jaringan';
+
+export function validateIndicatorName(
+  rawName: string,
+  existingIndicators: string[],
+  editingOldName?: string
+): string | null {
+  const trimmed = rawName.trim();
+  if (!trimmed) {
+    return 'Nama indikator kinerja wajib diisi.';
+  }
+  if (!/[a-zA-Z]/.test(trimmed)) {
+    return 'Nama indikator kinerja tidak valid (harus mengandung huruf, tidak boleh hanya angka atau simbol).';
+  }
+  const lower = trimmed.toLowerCase();
+  const isDuplicate = existingIndicators.some((ind) => {
+    if (editingOldName && ind === editingOldName) return false;
+    return ind.trim().toLowerCase() === lower;
+  });
+  if (isDuplicate) {
+    return `Nama indikator "${trimmed}" sudah ada.`;
+  }
+  return null;
+}
+
 export interface EvidenceItem {
   id: string;
   month: number; // 1..12
+  indicator: string; // Indikator Kinerja
   title: string; // Nama Bukti Dukung
   description?: string; // Uraian singkat (opsional)
   date?: string; // Tanggal kegiatan (opsional)
@@ -45,6 +71,8 @@ export interface ReportMetadata {
   supervisorName: string;
   supervisorNip: string;
   city: string;
+  indicators: string[];
+  selectedIndicator: string;
   includeCoverPage: boolean;
   includeEmptyMonths: boolean;
   photosPerPage: PhotosPerPage;
@@ -59,13 +87,15 @@ export interface ReportState {
 export const DEFAULT_METADATA: ReportMetadata = {
   year: new Date().getFullYear(),
   reportTitle: 'Laporan Foto Bukti Dukung E-Kinerja Tahunan',
-  employeeName: '',
-  nip: '',
-  position: '',
-  unit: '',
+  employeeName: 'Muhammad Gusti Kurniawan, S.Kom',
+  nip: '199308262025211037',
+  position: 'Penata Layanan Operasional',
+  unit: 'RSUD H. Abdul Manap Kota Jambi',
   supervisorName: '',
   supervisorNip: '',
-  city: '',
+  city: 'Jambi',
+  indicators: [DEFAULT_INDICATOR],
+  selectedIndicator: DEFAULT_INDICATOR,
   includeCoverPage: true,
   includeEmptyMonths: false,
   photosPerPage: 4,

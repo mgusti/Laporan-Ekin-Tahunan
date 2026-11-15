@@ -11,12 +11,21 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { EvidenceItem, MONTHS } from '../types/ekinerja';
+import {
+  DEFAULT_INDICATOR,
+  EvidenceItem,
+  MONTHS,
+  validateIndicatorName,
+} from '../types/ekinerja';
 import { cleanFileNameToTitle, processImageFile } from '../utils/storage';
 
 interface MonthEditorProps {
   year: number;
   monthIndex: number;
+  indicators: string[];
+  selectedIndicator: string;
+  onSelectIndicator: (indicator: string) => void;
+  onAddIndicator: (newIndicator: string) => void;
   items: EvidenceItem[];
   onSelectMonth: (month: number) => void;
   onAddItems: (newItems: Omit<EvidenceItem, 'id' | 'order' | 'createdAt'>[]) => void;
@@ -29,6 +38,10 @@ interface MonthEditorProps {
 export function MonthEditor({
   year,
   monthIndex,
+  indicators,
+  selectedIndicator,
+  onSelectIndicator,
+  onAddIndicator,
   items,
   onSelectMonth,
   onAddItems,
@@ -50,6 +63,11 @@ export function MonthEditor({
     fileName: string;
   } | null>(null);
 
+  // Inline new indicator form state
+  const [isAddingIndicator, setIsAddingIndicator] = useState(false);
+  const [newIndicatorName, setNewIndicatorName] = useState('');
+  const [showAllIndicatorsInList, setShowAllIndicatorsInList] = useState(false);
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -57,6 +75,24 @@ export function MonthEditor({
   const singleFileInputRef = useRef<HTMLInputElement>(null);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const filteredItems = showAllIndicatorsInList
+    ? items
+    : items.filter(
+        (item) => ((item.indicator ?? '').trim() || DEFAULT_INDICATOR) === selectedIndicator
+      );
+
+  const handleCreateIndicator = () => {
+    const err = validateIndicatorName(newIndicatorName, indicators);
+    if (err) {
+      setErrorMsg(err);
+      return;
+    }
+    setErrorMsg(null);
+    onAddIndicator(newIndicatorName.trim());
+    setNewIndicatorName('');
+    setIsAddingIndicator(false);
+  };
 
   const handleStageSinglePhoto = async (file: File) => {
     setErrorMsg(null);
@@ -84,9 +120,6 @@ export function MonthEditor({
       return;
     }
 
-    // If exactly 1 file and user dropped it while no draft photo exists, add immediately if draftTitle empty?
-    // Even better: if user drops multiple files (or uses batch upload), add them directly so they appear immediately!
-    // If 1 file is selected via the single-form picker, stage it so user can review/edit Nama Bukti Dukung before saving.
     setErrorMsg(null);
     setIsProcessing(true);
     try {
@@ -95,6 +128,7 @@ export function MonthEditor({
         const processed = await processImageFile(file);
         prepared.push({
           month: monthIndex,
+          indicator: selectedIndicator || DEFAULT_INDICATOR,
           title: cleanFileNameToTitle(file.name),
           date: draftDate || undefined,
           description: undefined,
@@ -121,6 +155,7 @@ export function MonthEditor({
     onAddItems([
       {
         month: monthIndex,
+        indicator: selectedIndicator || DEFAULT_INDICATOR,
         title: finalTitle,
         date: draftDate || undefined,
         description: draftDesc.trim() || undefined,
@@ -177,12 +212,25 @@ export function MonthEditor({
           <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
             {currentMonth.name} {year}
           </h1>
-          <div className="mt-1 flex items-center gap-2 text-sm text-slate-500">
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
             <span>Bulan ke-{monthIndex} dari 12</span>
             <span aria-hidden="true">·</span>
-            <span className="font-mono tabular-nums text-slate-700">
-              {items.length} bukti dukung
+            <span className="font-mono tabular-nums text-sky-900 font-medium">
+              {
+                items.filter(
+                  (i) => ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === selectedIndicator
+                ).length
+              }{' '}
+              bukti pada indikator dipilih
             </span>
+            {items.length > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="font-mono tabular-nums text-slate-500">
+                  total {items.length} bukti bulan ini
+                </span>
+              </>
+            )}
           </div>
         </div>
 
@@ -208,7 +256,7 @@ export function MonthEditor({
         </div>
       </div>
 
-      {/* Input Form: Photo + Nama Bukti Dukung */}
+      {/* Input Form: Photo + Indikator Kinerja + Nama Bukti Dukung */}
       <section
         aria-label="Tambah bukti dukung"
         onDragOver={(e) => {
@@ -227,7 +275,7 @@ export function MonthEditor({
               Tambah Foto &amp; Nama Bukti Dukung
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Isi satu per satu dengan nama kegiatan, atau unggah banyak foto sekaligus untuk bulan {currentMonth.name}.
+              Pilih Indikator Kinerja, lalu isi bukti dukung satu per satu atau unggah banyak foto sekaligus untuk bulan {currentMonth.name}.
             </p>
           </div>
 
@@ -322,6 +370,67 @@ export function MonthEditor({
 
           {/* Right: Metadata Fields */}
           <div className="md:col-span-7 space-y-4">
+            {/* Indikator Kinerja Field */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label
+                  htmlFor="draft-indicator"
+                  className="block text-xs font-semibold text-slate-700"
+                >
+                  Indikator Kinerja <span className="text-rose-600">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsAddingIndicator((v) => !v)}
+                  className="text-xs font-semibold text-sky-800 hover:text-sky-950"
+                >
+                  {isAddingIndicator ? 'Batal Tambah' : '+ Tambah Indikator Kinerja Baru'}
+                </button>
+              </div>
+
+              {isAddingIndicator ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newIndicatorName}
+                    onChange={(e) => setNewIndicatorName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleCreateIndicator();
+                      }
+                    }}
+                    placeholder="Contoh: Permintaan perbaikan perangkat keras/jaringan"
+                    className="flex-1 rounded-lg border border-sky-700 bg-white px-3.5 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-700/20"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCreateIndicator}
+                    className="rounded-lg bg-sky-900 px-3.5 py-2 text-xs font-medium text-white hover:bg-sky-800 whitespace-nowrap"
+                  >
+                    Simpan Indikator
+                  </button>
+                </div>
+              ) : (
+                <select
+                  id="draft-indicator"
+                  value={selectedIndicator}
+                  onChange={(e) => onSelectIndicator(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-sky-50/40 px-3.5 py-2.5 text-sm font-medium text-slate-900 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-700/20"
+                >
+                  {indicators.map((ind) => (
+                    <option key={ind} value={ind}>
+                      {ind}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <p className="mt-1 text-[11px] text-slate-500">
+                Saat mencetak PDF Januari–Desember, hanya bukti dukung pada Indikator Kinerja yang dipilih ini yang akan dicetak.
+              </p>
+            </div>
+
             <div>
               <label
                 htmlFor="draft-title"
@@ -334,7 +443,7 @@ export function MonthEditor({
                 type="text"
                 value={draftTitle}
                 onChange={(e) => setDraftTitle(e.target.value)}
-                placeholder={`Contoh: Rapat Koordinasi Bulanan ${currentMonth.name} ${year}`}
+                placeholder={`Contoh: Perbaikan jaringan ruang pelayanan bulan ${currentMonth.name} ${year}`}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-700/20"
               />
             </div>
@@ -381,7 +490,7 @@ export function MonthEditor({
 
             <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
               <span className="text-xs text-slate-500">
-                Disimpan otomatis ke arsip bulan {currentMonth.name} {year}.
+                Disimpan otomatis ke database MySQL untuk bulan {currentMonth.name} {year}.
               </span>
               <button
                 type="submit"
@@ -398,27 +507,75 @@ export function MonthEditor({
 
       {/* Evidence List for Selected Month */}
       <section aria-label={`Daftar bukti dukung ${currentMonth.name}`}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-base font-semibold text-slate-900">
-            Daftar Foto Bulan {currentMonth.name}
-          </h2>
-          <span className="font-mono text-xs tabular-nums text-slate-500">
-            {items.length} entri
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 className="font-display text-base font-semibold text-slate-900">
+              Daftar Foto Bulan {currentMonth.name}
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {showAllIndicatorsInList
+                ? `Menampilkan semua indikator kinerja (${filteredItems.length} entri)`
+                : `Indikator aktif: ${selectedIndicator} (${filteredItems.length} entri)`}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {items.length > 0 && indicators.length > 1 && (
+              <div className="flex items-center rounded-lg bg-slate-100 p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setShowAllIndicatorsInList(false)}
+                  className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
+                    !showAllIndicatorsInList
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Indikator Dipilih ({
+                    items.filter(
+                      (i) =>
+                        ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === selectedIndicator
+                    ).length
+                  })
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAllIndicatorsInList(true)}
+                  className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
+                    showAllIndicatorsInList
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Semua Indikator ({items.length})
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
-        {items.length === 0 ? (
+        {filteredItems.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
             <p className="text-sm font-medium text-slate-700">
-              Belum ada foto bukti dukung untuk bulan {currentMonth.name} {year}.
+              Belum ada foto bukti dukung pada bulan {currentMonth.name} {year} untuk indikator{' '}
+              <span className="font-semibold text-slate-900">&ldquo;{selectedIndicator}&rdquo;</span>.
             </p>
             <p className="mt-1 text-xs text-slate-500 max-w-md mx-auto">
               Unggah foto kegiatan di formulir atas atau seret beberapa gambar sekaligus ke area unggah.
             </p>
+            {items.length > 0 && !showAllIndicatorsInList && (
+              <button
+                type="button"
+                onClick={() => setShowAllIndicatorsInList(true)}
+                className="mt-4 inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Lihat {items.length} foto dari indikator lain di bulan ini
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {items.map((item, idx) => (
+            {filteredItems.map((item, idx) => (
               <article
                 key={item.id}
                 className="rounded-xl border border-slate-200 bg-white overflow-hidden flex flex-col"
@@ -439,6 +596,27 @@ export function MonthEditor({
                 {/* Editable Fields */}
                 <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
                   <div className="space-y-2.5">
+                    <div>
+                      <label
+                        htmlFor={`indicator-${item.id}`}
+                        className="block text-[11px] font-semibold text-slate-500 mb-1"
+                      >
+                        Indikator Kinerja
+                      </label>
+                      <select
+                        id={`indicator-${item.id}`}
+                        value={(item.indicator ?? '').trim() || DEFAULT_INDICATOR}
+                        onChange={(e) => onUpdateItem(item.id, { indicator: e.target.value })}
+                        className="w-full rounded-md border border-slate-200 bg-sky-50/40 px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-sky-700 focus:outline-none"
+                      >
+                        {indicators.map((ind) => (
+                          <option key={ind} value={ind}>
+                            {ind}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
                     <div>
                       <label
                         htmlFor={`title-${item.id}`}
@@ -535,7 +713,7 @@ export function MonthEditor({
                       <button
                         type="button"
                         aria-label="Turunkan urutan"
-                        disabled={idx === items.length - 1}
+                        disabled={idx === filteredItems.length - 1}
                         onClick={() => onMoveItemOrder(item.id, 'down')}
                         className="rounded-md border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50 disabled:opacity-35 disabled:cursor-not-allowed"
                       >

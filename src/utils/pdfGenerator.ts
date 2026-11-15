@@ -38,9 +38,13 @@ function drawHeader(doc: jsPDF, metadata: ReportMetadata, pageWidth: number, sub
 
   // Section subtitle
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
+  doc.setFontSize(10);
   doc.setTextColor(15, 76, 129);
-  doc.text(subtitle, MARGIN_X, MARGIN_TOP + 17);
+  const indicatorLabel = metadata.selectedIndicator.trim()
+    ? `  ·  Indikator: ${metadata.selectedIndicator.trim()}`
+    : '';
+  const fullSubtitle = doc.splitTextToSize(`${subtitle}${indicatorLabel}`, contentWidth)[0] ?? subtitle;
+  doc.text(fullSubtitle, MARGIN_X, MARGIN_TOP + 17);
 }
 
 function drawFooter(
@@ -108,13 +112,14 @@ function drawCoverPage(
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(203, 213, 225);
   doc.setLineWidth(0.35);
-  doc.rect(MARGIN_X, y, contentWidth, 36, 'FD');
+  doc.rect(MARGIN_X, y, contentWidth, 43.5, 'FD');
 
   const metaRows: Array<[string, string]> = [
     ['Nama Pegawai', metadata.employeeName.trim() || '—'],
     ['NIP / Identitas', metadata.nip.trim() || '—'],
     ['Jabatan', metadata.position.trim() || '—'],
     ['Unit Kerja / Instansi', metadata.unit.trim() || '—'],
+    ['Indikator Kinerja', metadata.selectedIndicator.trim() || '—'],
   ];
 
   let rowY = y + 7.5;
@@ -132,7 +137,7 @@ function drawCoverPage(
     rowY += 7.5;
   });
 
-  y += 45;
+  y += 52;
 
   // Summary Table Header
   doc.setFont('helvetica', 'bold');
@@ -426,9 +431,16 @@ export async function generateAndDownloadAnnualPdf(
     .trim()
     .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
-  const fileName = cleanName
-    ? `Laporan_EKinerja_F4_${metadata.year}_${cleanName}.pdf`
-    : `Laporan_EKinerja_F4_${metadata.year}.pdf`;
+  const cleanIndicator = metadata.selectedIndicator
+    .trim()
+    .slice(0, 40)
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const suffixParts = [cleanName, cleanIndicator].filter(Boolean);
+  const fileName =
+    suffixParts.length > 0
+      ? `Laporan_EKinerja_F4_${metadata.year}_${suffixParts.join('_')}.pdf`
+      : `Laporan_EKinerja_F4_${metadata.year}.pdf`;
 
   doc.save(fileName);
   return { fileName, totalPages: pages.length };
