@@ -15,20 +15,41 @@ const DB_CONFIG = {
 
 let pool: mysql.Pool | null = null;
 let initPromise: Promise<void> | null = null;
+let yearColumnEnsured = false;
 
 async function ensureDatabaseInitialized(): Promise<mysql.Pool> {
   if (pool && initPromise) {
-    await initPromise;
-    return pool;
+    try {
+      await initPromise;
+      await pool.query('SELECT 1');
+      if (!yearColumnEnsured) {
+        await pool
+          .query(
+            'ALTER TABLE `evidence_items` ADD COLUMN `year` INT NOT NULL DEFAULT 2026 AFTER `id`'
+          )
+          .catch(() => {});
+        yearColumnEnsured = true;
+      }
+      return pool;
+    } catch {
+      try {
+        await pool.end();
+      } catch {
+        // Ignore pool close errors
+      }
+      pool = null;
+      initPromise = null;
+    }
   }
 
   initPromise = (async () => {
-    const bootstrapConn = await mysql.createConnection({
-      host: DB_CONFIG.host,
-      port: DB_CONFIG.port,
-      user: DB_CONFIG.user,
-      password: DB_CONFIG.password,
-    });
+    try {
+      const bootstrapConn = await mysql.createConnection({
+        host: DB_CONFIG.host,
+        port: DB_CONFIG.port,
+        user: DB_CONFIG.user,
+        password: DB_CONFIG.password,
+      });
 
     try {
       await bootstrapConn.query(
@@ -97,6 +118,7 @@ async function ensureDatabaseInitialized(): Promise<mysql.Pool> {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS \`evidence_items\` (
         \`id\` VARCHAR(100) NOT NULL PRIMARY KEY,
+        \`year\` INT NOT NULL DEFAULT 2026,
         \`month\` TINYINT NOT NULL,
         \`indicator\` VARCHAR(500) NOT NULL DEFAULT 'Permintaan perbaikan perangkat keras/jaringan',
         \`title\` VARCHAR(500) NOT NULL,
@@ -107,16 +129,33 @@ async function ensureDatabaseInitialized(): Promise<mysql.Pool> {
         \`image_height\` INT NOT NULL,
         \`sort_order\` INT NOT NULL DEFAULT 0,
         \`created_at\` BIGINT NOT NULL,
-        INDEX \`idx_month_order\` (\`month\`, \`sort_order\`, \`created_at\`)
+        INDEX \`idx_year_month_order\` (\`year\`, \`month\`, \`sort_order\`, \`created_at\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
-    // Ensure indicator column exists on existing evidence_items table
+    // Ensure year and indicator columns exist on existing evidence_items table
+    await pool
+      .query(
+        'ALTER TABLE `evidence_items` ADD COLUMN `year` INT NOT NULL DEFAULT 2026 AFTER `id`'
+      )
+      .catch(() => {});
     await pool
       .query(
         `ALTER TABLE \`evidence_items\` ADD COLUMN \`indicator\` VARCHAR(500) NOT NULL DEFAULT '${DEFAULT_IND}' AFTER \`month\``
       )
       .catch(() => {});
+    } catch (err) {
+      if (pool) {
+        try {
+          await pool.end();
+        } catch {
+          // Ignore pool close errors
+        }
+      }
+      pool = null;
+      initPromise = null;
+      throw err;
+    }
   })();
 
   await initPromise;
@@ -173,7 +212,7 @@ async function handleApiRequest(req: IncomingMessage, res: ServerResponse): Prom
         'SELECT * FROM `report_metadata` WHERE `id` = 1 LIMIT 1'
       );
       const [itemRows] = await db.query<mysql.RowDataPacket[]>(
-        'SELECT * FROM `evidence_items` ORDER BY `month` ASC, `sort_order` ASC, `created_at` ASC'
+        'SELECT * FROM `evidence_items` ORDER BY `year` ASC, `month` ASC, `sort_order` ASC, `created_at` ASC'
       );
 
       const m = metaRows[0];
@@ -185,6 +224,7 @@ async function handleApiRequest(req: IncomingMessage, res: ServerResponse): Prom
         }
         return {
           id: String(row.id),
+          year: Number(row.year) || 2026,
           month: Number(row.month),
           indicator: ind,
           title: String(row.title ?? ''),
@@ -199,9 +239,10 @@ async function handleApiRequest(req: IncomingMessage, res: ServerResponse): Prom
       });
 
       const rawSelected = m ? String(m.selected_indicator ?? '').trim() : '';
-      const selectedIndicator = parsedIndicators.includes(rawSelected)
-        ? rawSelected
-        : parsedIndicators[0] || DEFAULT_IND;
+      const selectedIndicator =
+        rawSelected === '__ALL_INDICATORS__' || parsedIndicators.includes(rawSelected)
+          ? rawSelected
+          : parsedIndicators[0] || DEFAULT_IND;
 
       const metadata = m
         ? {
@@ -293,14 +334,16 @@ async function handleApiRequest(req: IncomingMessage, res: ServerResponse): Prom
             await conn.query('DELETE FROM `evidence_items` WHERE `id` NOT IN (?)', [ids]);
 
             for (const item of items) {
+              const itemYear = Number(item.year) || Number(metadata?.year) || 2026;
               const itemIndicator = String(item.indicator ?? '').trim() || DEFAULT_IND;
               if (item.imageDataUrl === '__KEEP__') {
                 await conn.query(
                   `UPDATE \`evidence_items\`
-                   SET \`month\` = ?, \`indicator\` = ?, \`title\` = ?, \`description\` = ?, \`date\` = ?,
+                   SET \`year\` = ?, \`month\` = ?, \`indicator\` = ?, \`title\` = ?, \`description\` = ?, \`date\` = ?,
                        \`image_width\` = ?, \`image_height\` = ?, \`sort_order\` = ?, \`created_at\` = ?
                    WHERE \`id\` = ?`,
                   [
+                    itemYear,
                     Number(item.month),
                     itemIndicator,
                     String(item.title ?? ''),
@@ -316,10 +359,11 @@ async function handleApiRequest(req: IncomingMessage, res: ServerResponse): Prom
               } else {
                 await conn.query(
                   `INSERT INTO \`evidence_items\` (
-                    \`id\`, \`month\`, \`indicator\`, \`title\`, \`description\`, \`date\`,
+                    \`id\`, \`year\`, \`month\`, \`indicator\`, \`title\`, \`description\`, \`date\`,
                     \`image_data_url\`, \`image_width\`, \`image_height\`, \`sort_order\`, \`created_at\`
-                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON DUPLICATE KEY UPDATE
+                    \`year\` = VALUES(\`year\`),
                     \`month\` = VALUES(\`month\`),
                     \`indicator\` = VALUES(\`indicator\`),
                     \`title\` = VALUES(\`title\`),
@@ -332,6 +376,7 @@ async function handleApiRequest(req: IncomingMessage, res: ServerResponse): Prom
                     \`created_at\` = VALUES(\`created_at\`)`,
                   [
                     String(item.id),
+                    itemYear,
                     Number(item.month),
                     itemIndicator,
                     String(item.title ?? ''),
@@ -387,10 +432,26 @@ async function handleApiRequest(req: IncomingMessage, res: ServerResponse): Prom
 
     sendJson(res, 405, { error: 'Method Not Allowed' });
     return true;
-  } catch (err) {
+  } catch (err: any) {
     console.error('[MySQL API Error]:', err);
-    sendJson(res, 500, {
-      error: err instanceof Error ? err.message : 'Database error',
+    const code = typeof err?.code === 'string' ? err.code : 'DB_CONNECTION_ERROR';
+    const rawMsg = err instanceof Error ? err.message : 'Database error';
+    const isConnRefused =
+      code === 'ECONNREFUSED' ||
+      code === 'PROTOCOL_CONNECTION_LOST' ||
+      code === 'ETIMEDOUT' ||
+      rawMsg.includes('ECONNREFUSED');
+
+    const friendlyMessage = isConnRefused
+      ? `Tidak dapat terhubung ke server MySQL di ${DB_CONFIG.host}:${DB_CONFIG.port} (${code}). Pastikan layanan MySQL (C:\\wamp64\\bin\\mysql\\mysql8.4.13) pada WAMP Server sudah aktif.`
+      : `Kesalahan database MySQL (${code}): ${rawMsg}`;
+
+    sendJson(res, 503, {
+      error: friendlyMessage,
+      code,
+      host: DB_CONFIG.host,
+      port: DB_CONFIG.port,
+      database: DB_CONFIG.database,
     });
     return true;
   }

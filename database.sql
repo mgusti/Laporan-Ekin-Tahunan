@@ -38,6 +38,7 @@ INSERT IGNORE INTO `report_metadata` (
 
 CREATE TABLE IF NOT EXISTS `evidence_items` (
   `id` VARCHAR(100) NOT NULL PRIMARY KEY,
+  `year` INT NOT NULL DEFAULT 2026,
   `month` TINYINT NOT NULL,
   `indicator` VARCHAR(500) NOT NULL DEFAULT 'Permintaan perbaikan perangkat keras/jaringan',
   `title` VARCHAR(500) NOT NULL,
@@ -48,5 +49,5 @@ CREATE TABLE IF NOT EXISTS `evidence_items` (
   `image_height` INT NOT NULL,
   `sort_order` INT NOT NULL DEFAULT 0,
   `created_at` BIGINT NOT NULL,
-  INDEX `idx_month_order` (`month`, `sort_order`, `created_at`)
+  INDEX `idx_year_month_order` (`year`, `month`, `sort_order`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

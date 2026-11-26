@@ -1,4 +1,5 @@
 import {
+  ALL_INDICATORS,
   DEFAULT_INDICATOR,
   EvidenceItem,
   MONTHS,
@@ -8,10 +9,50 @@ import {
 
 export function filterItemsByIndicator(
   items: EvidenceItem[],
-  selectedIndicator: string
+  selectedIndicator: string,
+  year?: number
 ): EvidenceItem[] {
   const target = (selectedIndicator ?? '').trim() || DEFAULT_INDICATOR;
-  return items.filter((item) => ((item.indicator ?? '').trim() || DEFAULT_INDICATOR) === target);
+  return items.filter((item) => {
+    if (year !== undefined && (Number(item.year) || 2026) !== year) {
+      return false;
+    }
+    if (target === ALL_INDICATORS) {
+      return true;
+    }
+    return ((item.indicator ?? '').trim() || DEFAULT_INDICATOR) === target;
+  });
+}
+
+export function getReportTitleForFilter(
+  baseTitle: string,
+  year: number,
+  monthIndex?: number | null
+): string {
+  const cleanBase = baseTitle.trim();
+  const isDefaultTitle =
+    !cleanBase || /^laporan foto bukti dukung e-kinerja/i.test(cleanBase);
+
+  if (monthIndex) {
+    const monthObj = MONTHS.find((m) => m.index === monthIndex);
+    if (monthObj) {
+      if (isDefaultTitle) {
+        return `Laporan Foto Bukti Dukung E-Kinerja Bulan ${monthObj.name} ${year}`;
+      }
+      if (/tahunan/i.test(cleanBase)) {
+        return `${cleanBase.replace(/tahunan/i, `Bulan ${monthObj.name}`)} ${year}`;
+      }
+      return `${cleanBase} Bulan ${monthObj.name} ${year}`;
+    }
+  }
+
+  if (isDefaultTitle) {
+    return `Laporan Foto Bukti Dukung E-Kinerja Tahun ${year}`;
+  }
+  if (/tahunan/i.test(cleanBase)) {
+    return cleanBase.replace(/tahunan/i, `Tahun ${year}`);
+  }
+  return `${cleanBase} Tahun ${year}`;
 }
 
 export interface CoverSummaryRow {
@@ -33,9 +74,11 @@ export type F4Page =
       pageNumber: number;
       totalPages: number;
       month: MonthDefinition;
+      indicator: string;
       monthPageIndex: number;
       monthTotalPages: number;
       startItemNumber: number;
+      actionPlan: string;
       items: EvidenceItem[];
     }
   | {
@@ -43,6 +86,7 @@ export type F4Page =
       pageNumber: number;
       totalPages: number;
       month: MonthDefinition;
+      indicator: string;
     };
 
 export function groupItemsByMonth(items: EvidenceItem[]): Map<number, EvidenceItem[]> {
@@ -68,7 +112,8 @@ type RawMonthPage =
   | Omit<Extract<F4Page, { type: 'month-empty' }>, 'pageNumber' | 'totalPages'>;
 
 export function buildAnnualPages(metadata: ReportMetadata, items: EvidenceItem[]): F4Page[] {
-  const filteredItems = filterItemsByIndicator(items, metadata.selectedIndicator);
+  const isAllIndicators = metadata.selectedIndicator === ALL_INDICATORS;
+  const filteredItems = filterItemsByIndicator(items, metadata.selectedIndicator, metadata.year);
   const grouped = groupItemsByMonth(filteredItems);
   const rawPages: RawMonthPage[] = [];
   const monthPageRanges = new Map<number, { start: number; end: number }>();
@@ -83,6 +128,9 @@ export function buildAnnualPages(metadata: ReportMetadata, items: EvidenceItem[]
         rawPages.push({
           type: 'month-empty',
           month,
+          indicator: isAllIndicators
+            ? 'Semua Indikator'
+            : metadata.selectedIndicator.trim() || DEFAULT_INDICATOR,
         });
         currentPageCursor += 1;
       }
@@ -90,20 +138,63 @@ export function buildAnnualPages(metadata: ReportMetadata, items: EvidenceItem[]
     }
 
     const perPage = metadata.photosPerPage;
-    const monthTotalPages = Math.ceil(monthItems.length / perPage);
     const startPage = currentPageCursor;
 
-    for (let i = 0; i < monthTotalPages; i++) {
-      const slice = monthItems.slice(i * perPage, (i + 1) * perPage);
-      rawPages.push({
-        type: 'month-photos',
-        month,
-        monthPageIndex: i + 1,
-        monthTotalPages,
-        startItemNumber: i * perPage + 1,
-        items: slice,
-      });
-      currentPageCursor += 1;
+    if (isAllIndicators) {
+      const indicatorOrder = [...metadata.indicators];
+      for (const item of monthItems) {
+        const ind = (item.indicator ?? '').trim() || DEFAULT_INDICATOR;
+        if (!indicatorOrder.includes(ind)) {
+          indicatorOrder.push(ind);
+        }
+      }
+      const activeIndicators = indicatorOrder.filter((ind) =>
+        monthItems.some((i) => ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === ind)
+      );
+
+      for (const ind of activeIndicators) {
+        const indItems = monthItems.filter(
+          (i) => ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === ind
+        );
+        const indTotalPages = Math.ceil(indItems.length / perPage);
+        const indActionPlan =
+          indItems.find((i) => i.description?.trim())?.description?.trim() ?? '';
+
+        for (let i = 0; i < indTotalPages; i++) {
+          const slice = indItems.slice(i * perPage, (i + 1) * perPage);
+          rawPages.push({
+            type: 'month-photos',
+            month,
+            indicator: ind,
+            monthPageIndex: i + 1,
+            monthTotalPages: indTotalPages,
+            startItemNumber: i * perPage + 1,
+            actionPlan: indActionPlan,
+            items: slice,
+          });
+          currentPageCursor += 1;
+        }
+      }
+    } else {
+      const targetIndicator = metadata.selectedIndicator.trim() || DEFAULT_INDICATOR;
+      const monthTotalPages = Math.ceil(monthItems.length / perPage);
+      const monthActionPlan =
+        monthItems.find((i) => i.description?.trim())?.description?.trim() ?? '';
+
+      for (let i = 0; i < monthTotalPages; i++) {
+        const slice = monthItems.slice(i * perPage, (i + 1) * perPage);
+        rawPages.push({
+          type: 'month-photos',
+          month,
+          indicator: targetIndicator,
+          monthPageIndex: i + 1,
+          monthTotalPages,
+          startItemNumber: i * perPage + 1,
+          actionPlan: monthActionPlan,
+          items: slice,
+        });
+        currentPageCursor += 1;
+      }
     }
 
     monthPageRanges.set(month.index, { start: startPage, end: currentPageCursor - 1 });

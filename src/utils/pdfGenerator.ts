@@ -1,20 +1,37 @@
 import { jsPDF } from 'jspdf';
-import { EvidenceItem, ReportMetadata } from '../types/ekinerja';
-import { buildAnnualPages, F4Page, formatIndonesianDate, getEndOfDecemberDateLabel } from './pdfLayout';
+import {
+  ALL_INDICATORS,
+  EvidenceItem,
+  formatIndicatorLabel,
+  MONTHS,
+  ReportMetadata,
+} from '../types/ekinerja';
+import {
+  buildAnnualPages,
+  F4Page,
+  getEndOfDecemberDateLabel,
+  getReportTitleForFilter,
+} from './pdfLayout';
 
 const F4_HEIGHT_MM = 330;
 const MARGIN_X = 16;
 const MARGIN_TOP = 16;
 const MARGIN_BOTTOM = 14;
 
-function drawHeader(doc: jsPDF, metadata: ReportMetadata, pageWidth: number, subtitle: string) {
+function drawHeader(
+  doc: jsPDF,
+  metadata: ReportMetadata,
+  pageWidth: number,
+  subtitleLine: string,
+  actionPlan?: string
+) {
   const contentWidth = pageWidth - MARGIN_X * 2;
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
+  doc.setFontSize(11.5);
   doc.setTextColor(15, 23, 42);
   doc.text(
-    (metadata.reportTitle || 'Laporan Foto Bukti Dukung E-Kinerja Tahunan').toUpperCase(),
+    metadata.reportTitle || `Laporan Foto Bukti Dukung E-Kinerja Tahun ${metadata.year}`,
     MARGIN_X,
     MARGIN_TOP + 2
   );
@@ -22,12 +39,12 @@ function drawHeader(doc: jsPDF, metadata: ReportMetadata, pageWidth: number, sub
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(71, 85, 105);
-  const identityParts: string[] = [`Tahun Laporan: ${metadata.year}`];
+  const identityParts: string[] = [];
   if (metadata.employeeName.trim()) identityParts.push(metadata.employeeName.trim());
   if (metadata.nip.trim()) identityParts.push(`NIP. ${metadata.nip.trim()}`);
   if (metadata.unit.trim()) identityParts.push(metadata.unit.trim());
 
-  const headerLine = identityParts.join('  |  ');
+  const headerLine = identityParts.join(' | ');
   const wrappedIdentity = doc.splitTextToSize(headerLine, contentWidth);
   doc.text(wrappedIdentity[0] ?? '', MARGIN_X, MARGIN_TOP + 7);
 
@@ -36,15 +53,23 @@ function drawHeader(doc: jsPDF, metadata: ReportMetadata, pageWidth: number, sub
   doc.setLineWidth(0.6);
   doc.line(MARGIN_X, MARGIN_TOP + 10.5, pageWidth - MARGIN_X, MARGIN_TOP + 10.5);
 
-  // Section subtitle
+  // Section subtitle (Indikator or Bulan · Indikator)
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(15, 76, 129);
-  const indicatorLabel = metadata.selectedIndicator.trim()
-    ? `  ·  Indikator: ${metadata.selectedIndicator.trim()}`
-    : '';
-  const fullSubtitle = doc.splitTextToSize(`${subtitle}${indicatorLabel}`, contentWidth)[0] ?? subtitle;
-  doc.text(fullSubtitle, MARGIN_X, MARGIN_TOP + 17);
+  const fullSubtitle =
+    doc.splitTextToSize(subtitleLine, contentWidth)[0] ?? subtitleLine;
+  doc.text(fullSubtitle, MARGIN_X, MARGIN_TOP + 16);
+
+  // Rencana Aksi right below Indikator
+  if (actionPlan?.trim()) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.8);
+    doc.setTextColor(51, 65, 85);
+    const actionLine =
+      doc.splitTextToSize(`Rencana Aksi: ${actionPlan.trim()}`, contentWidth)[0] ?? '';
+    doc.text(actionLine, MARGIN_X, MARGIN_TOP + 21);
+  }
 }
 
 function drawFooter(
@@ -119,7 +144,12 @@ function drawCoverPage(
     ['NIP / Identitas', metadata.nip.trim() || '—'],
     ['Jabatan', metadata.position.trim() || '—'],
     ['Unit Kerja / Instansi', metadata.unit.trim() || '—'],
-    ['Indikator Kinerja', metadata.selectedIndicator.trim() || '—'],
+    [
+      'Indikator Kinerja',
+      metadata.selectedIndicator === ALL_INDICATORS
+        ? `Semua Indikator (${metadata.indicators.length} Indikator)`
+        : metadata.selectedIndicator.trim() || '—',
+    ],
   ];
 
   let rowY = y + 7.5;
@@ -249,20 +279,15 @@ function drawPhotoCard(
 ) {
   // Card border
   doc.setDrawColor(203, 213, 225);
-  doc.setFillColor(255, 255, 255);
+  doc.setFillColor(248, 250, 252);
   doc.setLineWidth(0.35);
   doc.rect(x, y, w, h, 'FD');
 
-  const captionH = item.description?.trim() ? 22 : 16;
-  const imgPad = 3;
+  const imgPad = 2.5;
   const imgBoxX = x + imgPad;
   const imgBoxY = y + imgPad;
   const imgBoxW = w - imgPad * 2;
-  const imgBoxH = h - captionH - imgPad * 2;
-
-  // Neutral image mat
-  doc.setFillColor(248, 250, 252);
-  doc.rect(imgBoxX, imgBoxY, imgBoxW, imgBoxH, 'F');
+  const imgBoxH = h - imgPad * 2;
 
   // Fit image inside imgBox preserving aspect ratio
   const imgRatio = item.imageWidth / Math.max(1, item.imageHeight);
@@ -292,46 +317,57 @@ function drawPhotoCard(
     });
   }
 
-  // Divider above caption
-  const capTop = y + h - captionH;
-  doc.setDrawColor(226, 232, 240);
-  doc.setLineWidth(0.25);
-  doc.line(x, capTop, x + w, capTop);
+  // Top-left number badge on each photo
+  const label = String(indexNumber);
+  const badgeH = 7;
+  const badgeW = Math.max(7, 4.6 + label.length * 2.2);
+  const badgeX = x + 3;
+  const badgeY = y + 3;
+  const radius = 1.8;
 
-  // Caption text
+  // Subtle shadow behind badge
+  doc.setFillColor(15, 23, 42);
+  doc.roundedRect(badgeX + 0.25, badgeY + 0.3, badgeW, badgeH, radius, radius, 'F');
+
+  // Deep navy rounded badge with white border ring
+  doc.setFillColor(15, 76, 129);
+  doc.setDrawColor(255, 255, 255);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(badgeX, badgeY, badgeW, badgeH, radius, radius, 'FD');
+
+  // Centered white number
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(15, 23, 42);
-  const titleText = `${indexNumber}. ${item.title.trim() || 'Bukti Dukung E-Kinerja'}`;
-  const titleLines = doc.splitTextToSize(titleText, w - 6).slice(0, 2);
-  doc.text(titleLines, x + 3, capTop + 4.8);
-
-  const subParts: string[] = [];
-  if (item.date) subParts.push(formatIndonesianDate(item.date));
-  if (item.description?.trim()) subParts.push(item.description.trim());
-
-  if (subParts.length > 0) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(100, 116, 139);
-    const descLine = doc.splitTextToSize(subParts.join(' · '), w - 6)[0] ?? '';
-    const descY = titleLines.length > 1 ? capTop + 14.5 : capTop + 10.5;
-    doc.text(descLine, x + 3, descY);
-  }
+  doc.setFontSize(9.2);
+  doc.setTextColor(255, 255, 255);
+  doc.text(label, badgeX + badgeW / 2, badgeY + badgeH / 2 + 1.1, {
+    align: 'center',
+  });
 }
 
 function drawMonthPhotosPage(
   doc: jsPDF,
   metadata: ReportMetadata,
-  page: Extract<F4Page, { type: 'month-photos' }>
+  page: Extract<F4Page, { type: 'month-photos' }>,
+  isSingleMonthFilter: boolean
 ) {
   const pageWidth = metadata.paperWidthMm;
   const contentWidth = pageWidth - MARGIN_X * 2;
   const monthSuffix =
     page.monthTotalPages > 1 ? ` (Bagian ${page.monthPageIndex} dari ${page.monthTotalPages})` : '';
-  drawHeader(doc, metadata, pageWidth, `Bulan: ${page.month.name} ${metadata.year}${monthSuffix}`);
+  const indicatorText = `Indikator: ${page.indicator.trim() || '—'}`;
+  const subtitleLine = isSingleMonthFilter
+    ? `${indicatorText}${monthSuffix}`
+    : `Bulan: ${page.month.name}${monthSuffix} · ${indicatorText}`;
 
-  const gridTop = MARGIN_TOP + 22;
+  drawHeader(
+    doc,
+    metadata,
+    pageWidth,
+    subtitleLine,
+    page.actionPlan
+  );
+
+  const gridTop = page.actionPlan?.trim() ? MARGIN_TOP + 25.5 : MARGIN_TOP + 22;
   const gridBottom = F4_HEIGHT_MM - MARGIN_BOTTOM - 8;
   const gridHeight = gridBottom - gridTop;
 
@@ -364,11 +400,16 @@ function drawMonthPhotosPage(
 function drawEmptyMonthPage(
   doc: jsPDF,
   metadata: ReportMetadata,
-  page: Extract<F4Page, { type: 'month-empty' }>
+  page: Extract<F4Page, { type: 'month-empty' }>,
+  isSingleMonthFilter: boolean
 ) {
   const pageWidth = metadata.paperWidthMm;
   const contentWidth = pageWidth - MARGIN_X * 2;
-  drawHeader(doc, metadata, pageWidth, `Bulan: ${page.month.name} ${metadata.year}`);
+  const indicatorText = `Indikator: ${page.indicator.trim() || '—'}`;
+  const subtitleLine = isSingleMonthFilter
+    ? indicatorText
+    : `Bulan: ${page.month.name} · ${indicatorText}`;
+  drawHeader(doc, metadata, pageWidth, subtitleLine);
 
   const boxY = MARGIN_TOP + 34;
   doc.setDrawColor(203, 213, 225);
@@ -394,32 +435,56 @@ function drawEmptyMonthPage(
 export async function generateAndDownloadAnnualPdf(
   metadata: ReportMetadata,
   items: EvidenceItem[],
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (current: number, total: number) => void,
+  filterTarget: string = 'all'
 ): Promise<{ fileName: string; totalPages: number }> {
-  const pages = buildAnnualPages(metadata, items);
+  const allPages = buildAnnualPages(metadata, items);
+  let pages = allPages;
+  let selectedMonthIndex: number | null = null;
+
+  if (filterTarget === 'cover') {
+    pages = allPages.filter((p) => p.type === 'cover');
+  } else if (filterTarget !== 'all') {
+    const monthNum = parseInt(filterTarget, 10);
+    if (!Number.isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
+      selectedMonthIndex = monthNum;
+      pages = allPages.filter((p) => p.type !== 'cover' && p.month.index === monthNum);
+    }
+  }
+
   if (pages.length === 0) {
     throw new Error('Tidak ada halaman untuk diekspor. Tambahkan minimal satu foto bukti dukung atau aktifkan halaman sampul.');
   }
 
+  const isSingleMonthFilter = selectedMonthIndex !== null;
+  const effectiveMetadata: ReportMetadata = {
+    ...metadata,
+    reportTitle: getReportTitleForFilter(
+      metadata.reportTitle,
+      metadata.year,
+      selectedMonthIndex
+    ),
+  };
+
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
-    format: [metadata.paperWidthMm, F4_HEIGHT_MM],
+    format: [effectiveMetadata.paperWidthMm, F4_HEIGHT_MM],
     compress: true,
   });
 
   for (let i = 0; i < pages.length; i++) {
     const page = pages[i];
     if (i > 0) {
-      doc.addPage([metadata.paperWidthMm, F4_HEIGHT_MM], 'portrait');
+      doc.addPage([effectiveMetadata.paperWidthMm, F4_HEIGHT_MM], 'portrait');
     }
 
     if (page.type === 'cover') {
-      drawCoverPage(doc, metadata, page);
+      drawCoverPage(doc, effectiveMetadata, page);
     } else if (page.type === 'month-photos') {
-      drawMonthPhotosPage(doc, metadata, page);
+      drawMonthPhotosPage(doc, effectiveMetadata, page, isSingleMonthFilter);
     } else {
-      drawEmptyMonthPage(doc, metadata, page);
+      drawEmptyMonthPage(doc, effectiveMetadata, page, isSingleMonthFilter);
     }
 
     onProgress?.(i + 1, pages.length);
@@ -427,20 +492,23 @@ export async function generateAndDownloadAnnualPdf(
     await new Promise((r) => setTimeout(r, 8));
   }
 
-  const cleanName = metadata.employeeName
+  const cleanName = effectiveMetadata.employeeName
     .trim()
     .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
-  const cleanIndicator = metadata.selectedIndicator
+  const cleanIndicator = formatIndicatorLabel(effectiveMetadata.selectedIndicator)
     .trim()
     .slice(0, 40)
     .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
-  const suffixParts = [cleanName, cleanIndicator].filter(Boolean);
+  const monthLabel = selectedMonthIndex
+    ? `Bulan_${MONTHS.find((m) => m.index === selectedMonthIndex)?.name ?? selectedMonthIndex}`
+    : '';
+  const suffixParts = [monthLabel, cleanName, cleanIndicator].filter(Boolean);
   const fileName =
     suffixParts.length > 0
-      ? `Laporan_EKinerja_F4_${metadata.year}_${suffixParts.join('_')}.pdf`
-      : `Laporan_EKinerja_F4_${metadata.year}.pdf`;
+      ? `Laporan_EKinerja_F4_${effectiveMetadata.year}_${suffixParts.join('_')}.pdf`
+      : `Laporan_EKinerja_F4_${effectiveMetadata.year}.pdf`;
 
   doc.save(fileName);
   return { fileName, totalPages: pages.length };

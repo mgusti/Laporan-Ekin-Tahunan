@@ -1,17 +1,19 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ImagePlus,
   Loader2,
+  Lock,
   Plus,
   RefreshCw,
   Trash2,
-  Upload,
 } from 'lucide-react';
 import {
+  ALL_INDICATORS,
   DEFAULT_INDICATOR,
   EvidenceItem,
   MONTHS,
@@ -30,7 +32,9 @@ interface MonthEditorProps {
   onSelectMonth: (month: number) => void;
   onAddItems: (newItems: Omit<EvidenceItem, 'id' | 'order' | 'createdAt'>[]) => void;
   onUpdateItem: (id: string, patch: Partial<EvidenceItem>) => void;
+  onUpdateMonthActionPlan: (month: number, indicator: string, actionPlan: string) => void;
   onDeleteItem: (id: string) => void;
+  onDeleteMonthItems: (month: number, indicator?: string) => void;
   onMoveItemOrder: (id: string, direction: 'up' | 'down') => void;
   onMoveItemMonth: (id: string, targetMonth: number) => void;
 }
@@ -46,41 +50,77 @@ export function MonthEditor({
   onSelectMonth,
   onAddItems,
   onUpdateItem,
+  onUpdateMonthActionPlan,
   onDeleteItem,
+  onDeleteMonthItems,
   onMoveItemOrder,
   onMoveItemMonth,
 }: MonthEditorProps) {
   const currentMonth = MONTHS.find((m) => m.index === monthIndex) ?? MONTHS[0];
 
-  // Staged single-item form state
+  // Staged single/multi-item form state
   const [draftTitle, setDraftTitle] = useState('');
-  const [draftDate, setDraftDate] = useState('');
+  const [draftMonth, setDraftMonth] = useState<number>(monthIndex);
   const [draftDesc, setDraftDesc] = useState('');
-  const [draftPhoto, setDraftPhoto] = useState<{
-    dataUrl: string;
-    width: number;
-    height: number;
-    fileName: string;
-  } | null>(null);
+  const [draftPhotos, setDraftPhotos] = useState<
+    Array<{
+      dataUrl: string;
+      width: number;
+      height: number;
+      fileName: string;
+    }>
+  >([]);
+  const [lastUploadedCount, setLastUploadedCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    setDraftMonth(monthIndex);
+    setLastUploadedCount(null);
+  }, [monthIndex]);
+
+  const activeIndicatorClean =
+    selectedIndicator === ALL_INDICATORS
+      ? indicators[0] || DEFAULT_INDICATOR
+      : selectedIndicator.trim() || DEFAULT_INDICATOR;
+  const lockedMonthActionPlan =
+    items
+      .find(
+        (i) =>
+          ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === activeIndicatorClean &&
+          Boolean(i.description?.trim())
+      )
+      ?.description?.trim() ?? '';
+  const isMonthActionPlanLocked = Boolean(lockedMonthActionPlan);
+
+  // Pre-fill Rencana Aksi from existing items in this month & active indicator when switching month/indicator or when items change
+  useEffect(() => {
+    setDraftDesc(lockedMonthActionPlan);
+  }, [monthIndex, activeIndicatorClean, lockedMonthActionPlan]);
+
+  const selectedDraftMonth = MONTHS.find((m) => m.index === draftMonth) ?? currentMonth;
 
   // Inline new indicator form state
   const [isAddingIndicator, setIsAddingIndicator] = useState(false);
   const [newIndicatorName, setNewIndicatorName] = useState('');
   const [showAllIndicatorsInList, setShowAllIndicatorsInList] = useState(false);
+  const [confirmDeleteAllMonth, setConfirmDeleteAllMonth] = useState(false);
+
+  useEffect(() => {
+    setConfirmDeleteAllMonth(false);
+  }, [monthIndex, selectedIndicator, showAllIndicatorsInList]);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
   const singleFileInputRef = useRef<HTMLInputElement>(null);
-  const batchFileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
-  const filteredItems = showAllIndicatorsInList
-    ? items
-    : items.filter(
-        (item) => ((item.indicator ?? '').trim() || DEFAULT_INDICATOR) === selectedIndicator
-      );
+  const filteredItems =
+    showAllIndicatorsInList || selectedIndicator === ALL_INDICATORS
+      ? items
+      : items.filter(
+          (item) => ((item.indicator ?? '').trim() || DEFAULT_INDICATOR) === activeIndicatorClean
+        );
 
   const handleCreateIndicator = () => {
     const err = validateIndicatorName(newIndicatorName, indicators);
@@ -94,26 +134,7 @@ export function MonthEditor({
     setIsAddingIndicator(false);
   };
 
-  const handleStageSinglePhoto = async (file: File) => {
-    setErrorMsg(null);
-    setIsProcessing(true);
-    try {
-      const processed = await processImageFile(file);
-      setDraftPhoto({
-        ...processed,
-        fileName: file.name,
-      });
-      if (!draftTitle.trim()) {
-        setDraftTitle(cleanFileNameToTitle(file.name));
-      }
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Gagal memproses foto.');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleBatchFiles = async (fileList: FileList | File[]) => {
+  const handleStageFiles = async (fileList: FileList | File[]) => {
     const files = Array.from(fileList).filter((f) => f.type.startsWith('image/'));
     if (files.length === 0) {
       setErrorMsg('Pilih berkas gambar (JPG, PNG, atau WebP).');
@@ -123,23 +144,30 @@ export function MonthEditor({
     setErrorMsg(null);
     setIsProcessing(true);
     try {
-      const prepared: Omit<EvidenceItem, 'id' | 'order' | 'createdAt'>[] = [];
+      const staged: Array<{
+        dataUrl: string;
+        width: number;
+        height: number;
+        fileName: string;
+      }> = [];
       for (const file of files) {
         const processed = await processImageFile(file);
-        prepared.push({
-          month: monthIndex,
-          indicator: selectedIndicator || DEFAULT_INDICATOR,
-          title: cleanFileNameToTitle(file.name),
-          date: draftDate || undefined,
-          description: undefined,
-          imageDataUrl: processed.dataUrl,
-          imageWidth: processed.width,
-          imageHeight: processed.height,
+        staged.push({
+          ...processed,
+          fileName: file.name,
         });
       }
-      onAddItems(prepared);
+      setDraftPhotos(staged);
+      setLastUploadedCount(staged.length);
+      if (!draftTitle.trim() && staged.length > 0) {
+        setDraftTitle(
+          staged.length === 1
+            ? cleanFileNameToTitle(staged[0].fileName)
+            : `${staged.length} Foto Bukti Dukung`
+        );
+      }
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Gagal mengunggah beberapa foto.');
+      setErrorMsg(err instanceof Error ? err.message : 'Gagal memproses foto.');
     } finally {
       setIsProcessing(false);
     }
@@ -147,27 +175,44 @@ export function MonthEditor({
 
   const handleSaveDraft = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!draftPhoto) {
-      setErrorMsg('Silakan pilih foto bukti dukung terlebih dahulu.');
+    if (draftPhotos.length === 0) {
+      setErrorMsg('Silakan pilih atau seret foto bukti dukung terlebih dahulu.');
       return;
     }
-    const finalTitle = draftTitle.trim() || cleanFileNameToTitle(draftPhoto.fileName);
-    onAddItems([
-      {
-        month: monthIndex,
-        indicator: selectedIndicator || DEFAULT_INDICATOR,
-        title: finalTitle,
-        date: draftDate || undefined,
-        description: draftDesc.trim() || undefined,
-        imageDataUrl: draftPhoto.dataUrl,
-        imageWidth: draftPhoto.width,
-        imageHeight: draftPhoto.height,
-      },
-    ]);
+    const finalActionPlan = (isMonthActionPlanLocked ? lockedMonthActionPlan : draftDesc).trim();
+    if (!finalActionPlan) {
+      setErrorMsg('Rencana Aksi wajib diisi.');
+      return;
+    }
+    if (!draftMonth || draftMonth < 1 || draftMonth > 12) {
+      setErrorMsg('Bulan wajib dipilih (Januari - Desember).');
+      return;
+    }
+
+    const activeInd = activeIndicatorClean;
+    const customTitle = draftTitle.trim();
+    const prepared: Omit<EvidenceItem, 'id' | 'order' | 'createdAt'>[] = draftPhotos.map(
+      (photo) => ({
+        year,
+        month: draftMonth,
+        indicator: activeInd,
+        title:
+          draftPhotos.length === 1
+            ? customTitle || cleanFileNameToTitle(photo.fileName)
+            : cleanFileNameToTitle(photo.fileName),
+        date: undefined,
+        description: finalActionPlan,
+        imageDataUrl: photo.dataUrl,
+        imageWidth: photo.width,
+        imageHeight: photo.height,
+      })
+    );
+
+    const savedCount = prepared.length;
+    onAddItems(prepared);
     setDraftTitle('');
-    setDraftDate('');
-    setDraftDesc('');
-    setDraftPhoto(null);
+    setDraftPhotos([]);
+    setLastUploadedCount(savedCount);
     setErrorMsg(null);
     if (singleFileInputRef.current) singleFileInputRef.current.value = '';
   };
@@ -193,14 +238,7 @@ export function MonthEditor({
     e.preventDefault();
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
-      if (files.length === 1 && !draftPhoto) {
-        await handleStageSinglePhoto(files[0]);
-      } else if (files.length > 0) {
-        await handleBatchFiles(files);
-      } else {
-        setErrorMsg('Hanya berkas gambar (JPG, PNG, WebP) yang didukung.');
-      }
+      await handleStageFiles(e.dataTransfer.files);
     }
   };
 
@@ -269,103 +307,92 @@ export function MonthEditor({
           isDragOver ? 'border-sky-700 bg-sky-50/40' : 'border-slate-200'
         }`}
       >
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 className="font-display text-base font-semibold text-slate-900">
-              Tambah Foto &amp; Nama Bukti Dukung
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Pilih Indikator Kinerja, lalu isi bukti dukung satu per satu atau unggah banyak foto sekaligus untuk bulan {currentMonth.name}.
-            </p>
-          </div>
+        <div className="mb-4">
+          <h2 className="font-display text-base font-semibold text-slate-900">
+            Tambah Foto &amp; Nama Bukti Dukung
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Pilih atau seret satu maupun banyak foto sekaligus untuk bulan {currentMonth.name}, lengkapi Rencana Aksi, lalu klik Simpan Bukti Dukung.
+          </p>
+        </div>
 
-          <div>
+        <form onSubmit={handleSaveDraft} className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
+          {/* Left: Photo Picker / Multi-Photo Dropzone */}
+          <div className="md:col-span-5">
             <input
-              ref={batchFileInputRef}
+              ref={singleFileInputRef}
               type="file"
               accept="image/*"
               multiple
               className="hidden"
               onChange={(e) => {
                 if (e.target.files && e.target.files.length > 0) {
-                  void handleBatchFiles(e.target.files);
+                  void handleStageFiles(e.target.files);
                   e.target.value = '';
                 }
               }}
             />
+
             <button
               type="button"
-              onClick={() => batchFileInputRef.current?.click()}
+              onClick={() => singleFileInputRef.current?.click()}
               disabled={isProcessing}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors whitespace-nowrap"
+              className={`flex aspect-[4/3] w-full flex-col items-center justify-center gap-2.5 rounded-lg border border-dashed p-4 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-700 ${
+                draftPhotos.length > 0
+                  ? 'border-sky-700 bg-sky-50/50 hover:bg-sky-50'
+                  : lastUploadedCount !== null && lastUploadedCount > 0
+                  ? 'border-emerald-500 bg-emerald-50/40 hover:border-sky-700 hover:bg-sky-50/30'
+                  : 'border-slate-300 bg-slate-50/80 hover:border-sky-700 hover:bg-sky-50/30'
+              }`}
             >
-              <Upload className="h-3.5 w-3.5" />
-              <span>Unggah Banyak Foto Sekaligus</span>
-            </button>
-          </div>
-        </div>
+              {isProcessing ? (
+                <Loader2 className="h-7 w-7 animate-spin text-sky-800" />
+              ) : draftPhotos.length > 0 ? (
+                <CheckCircle2 className="h-7 w-7 text-sky-800" />
+              ) : lastUploadedCount !== null && lastUploadedCount > 0 ? (
+                <CheckCircle2 className="h-7 w-7 text-emerald-600" />
+              ) : (
+                <ImagePlus className="h-7 w-7 text-slate-400" />
+              )}
 
-        <form onSubmit={handleSaveDraft} className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
-          {/* Left: Photo Picker / Preview */}
-          <div className="md:col-span-5">
-            <input
-              ref={singleFileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  void handleStageSinglePhoto(file);
-                }
-              }}
-            />
-
-            {draftPhoto ? (
-              <div className="relative rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
-                <div className="aspect-[4/3] w-full flex items-center justify-center p-2">
-                  <img
-                    src={draftPhoto.dataUrl}
-                    alt={draftTitle || 'Pratinjau foto bukti dukung'}
-                    referrerPolicy="no-referrer"
-                    className="max-h-full max-w-full object-contain rounded"
-                  />
-                </div>
-                <div className="flex items-center justify-between border-t border-slate-200 bg-white px-3 py-2 text-xs">
-                  <span className="truncate text-slate-600 max-w-[180px]">
-                    {draftPhoto.fileName}
+              <div>
+                <span className="block text-sm font-semibold text-slate-800">
+                  Pilih atau Seret Foto ke Sini
+                </span>
+                {draftPhotos.length > 0 ? (
+                  <span className="mt-1 inline-block rounded-full bg-sky-900 px-3 py-0.5 text-xs font-semibold text-white">
+                    {draftPhotos.length} foto berhasil diupload (Siap disimpan)
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => singleFileInputRef.current?.click()}
-                    className="font-medium text-sky-800 hover:text-sky-900 whitespace-nowrap"
-                  >
-                    Ganti Foto
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => singleFileInputRef.current?.click()}
-                disabled={isProcessing}
-                className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-2.5 rounded-lg border border-dashed border-slate-300 bg-slate-50/80 p-4 text-center hover:border-sky-700 hover:bg-sky-50/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-700"
-              >
-                {isProcessing ? (
-                  <Loader2 className="h-7 w-7 animate-spin text-sky-800" />
+                ) : lastUploadedCount !== null && lastUploadedCount > 0 ? (
+                  <span className="mt-1 inline-block rounded-full bg-emerald-700 px-3 py-0.5 text-xs font-semibold text-white">
+                    Sukses mengunggah {lastUploadedCount} foto!
+                  </span>
                 ) : (
-                  <ImagePlus className="h-7 w-7 text-slate-400" />
-                )}
-                <div>
-                  <span className="block text-sm font-medium text-slate-800">
-                    Pilih atau Seret Foto ke Sini
-                  </span>
                   <span className="block text-xs text-slate-500 mt-0.5">
-                    JPG, PNG, atau WebP · Otomatis disesuaikan untuk F4
+                    Bisa pilih 1 atau banyak foto sekaligus (JPG, PNG, WebP)
                   </span>
+                )}
+              </div>
+
+              {draftPhotos.length > 0 && (
+                <div className="mt-1 flex items-center justify-center gap-1.5 overflow-hidden">
+                  {draftPhotos.slice(0, 4).map((p, idx) => (
+                    <img
+                      key={`${p.fileName}-${idx}`}
+                      src={p.dataUrl}
+                      alt={p.fileName}
+                      referrerPolicy="no-referrer"
+                      className="h-11 w-11 rounded border border-slate-300 bg-white object-cover shadow-xs"
+                    />
+                  ))}
+                  {draftPhotos.length > 4 && (
+                    <span className="flex h-11 w-11 items-center justify-center rounded border border-slate-300 bg-white font-mono text-xs font-bold text-slate-700">
+                      +{draftPhotos.length - 4}
+                    </span>
+                  )}
                 </div>
-              </button>
-            )}
+              )}
+            </button>
           </div>
 
           {/* Right: Metadata Fields */}
@@ -415,7 +442,7 @@ export function MonthEditor({
               ) : (
                 <select
                   id="draft-indicator"
-                  value={selectedIndicator}
+                  value={activeIndicatorClean}
                   onChange={(e) => onSelectIndicator(e.target.value)}
                   className="w-full rounded-lg border border-slate-200 bg-sky-50/40 px-3.5 py-2.5 text-sm font-medium text-slate-900 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-700/20"
                 >
@@ -432,6 +459,48 @@ export function MonthEditor({
             </div>
 
             <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label
+                  htmlFor="draft-desc"
+                  className="block text-xs font-semibold text-slate-700"
+                >
+                  Rencana Aksi <span className="text-rose-600">*</span>
+                </label>
+                {isMonthActionPlanLocked && (
+                  <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                    <Lock className="h-3 w-3 text-slate-500" />
+                    <span>Terkunci untuk bulan {selectedDraftMonth.name}</span>
+                  </span>
+                )}
+              </div>
+              <input
+                id="draft-desc"
+                type="text"
+                required
+                readOnly={isMonthActionPlanLocked}
+                disabled={isMonthActionPlanLocked}
+                value={isMonthActionPlanLocked ? lockedMonthActionPlan : draftDesc}
+                onChange={(e) => {
+                  if (isMonthActionPlanLocked) return;
+                  const val = e.target.value;
+                  setDraftDesc(val);
+                  if (errorMsg) setErrorMsg(null);
+                }}
+                placeholder="Masukkan rencana aksi untuk semua foto di bulan ini"
+                className={`w-full rounded-lg border px-3.5 py-2.5 text-sm ${
+                  isMonthActionPlanLocked
+                    ? 'border-slate-200 bg-slate-100 text-slate-600 cursor-not-allowed select-none'
+                    : 'border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-700/20'
+                }`}
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                {isMonthActionPlanLocked
+                  ? `Rencana Aksi bulan ${selectedDraftMonth.name} sudah diinput dan dikunci otomatis untuk seluruh foto di bulan ini.`
+                  : `Rencana Aksi ini berlaku untuk seluruh foto bukti dukung pada bulan ${selectedDraftMonth.name} dan akan dikunci setelah diinput.`}
+              </p>
+            </div>
+
+            <div>
               <label
                 htmlFor="draft-title"
                 className="block text-xs font-semibold text-slate-700 mb-1.5"
@@ -441,45 +510,38 @@ export function MonthEditor({
               <input
                 id="draft-title"
                 type="text"
+                required
                 value={draftTitle}
                 onChange={(e) => setDraftTitle(e.target.value)}
-                placeholder={`Contoh: Perbaikan jaringan ruang pelayanan bulan ${currentMonth.name} ${year}`}
+                placeholder={`Contoh: Perbaikan jaringan ruang pelayanan bulan ${selectedDraftMonth.name} ${year}`}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-700/20"
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label
-                  htmlFor="draft-date"
-                  className="block text-xs font-semibold text-slate-700 mb-1.5"
-                >
-                  Tanggal Kegiatan (Opsional)
-                </label>
-                <input
-                  id="draft-date"
-                  type="date"
-                  value={draftDate}
-                  onChange={(e) => setDraftDate(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono text-slate-900 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-700/20"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="draft-desc"
-                  className="block text-xs font-semibold text-slate-700 mb-1.5"
-                >
-                  Keterangan Singkat (Opsional)
-                </label>
-                <input
-                  id="draft-desc"
-                  type="text"
-                  value={draftDesc}
-                  onChange={(e) => setDraftDesc(e.target.value)}
-                  placeholder="Lokasi atau ringkasan hasil"
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-700/20"
-                />
-              </div>
+            <div>
+              <label
+                htmlFor="draft-month"
+                className="block text-xs font-semibold text-slate-700 mb-1.5"
+              >
+                Bulan <span className="text-rose-600">*</span>
+              </label>
+              <select
+                id="draft-month"
+                required
+                value={draftMonth}
+                onChange={(e) => {
+                  const nextMonth = parseInt(e.target.value, 10);
+                  setDraftMonth(nextMonth);
+                  onSelectMonth(nextMonth);
+                }}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-medium text-slate-900 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-700/20"
+              >
+                {MONTHS.map((m) => (
+                  <option key={m.index} value={m.index}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {errorMsg && (
@@ -494,11 +556,15 @@ export function MonthEditor({
               </span>
               <button
                 type="submit"
-                disabled={isProcessing || !draftPhoto}
+                disabled={isProcessing || draftPhotos.length === 0}
                 className="inline-flex items-center gap-2 rounded-lg bg-sky-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-45 transition-colors whitespace-nowrap"
               >
                 <Plus className="h-4 w-4" />
-                <span>Simpan Bukti Dukung</span>
+                <span>
+                  {draftPhotos.length > 1
+                    ? `Simpan ${draftPhotos.length} Bukti Dukung`
+                    : 'Simpan Bukti Dukung'}
+                </span>
               </button>
             </div>
           </div>
@@ -513,20 +579,25 @@ export function MonthEditor({
               Daftar Foto Bulan {currentMonth.name}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              {showAllIndicatorsInList
+              {showAllIndicatorsInList || selectedIndicator === ALL_INDICATORS
                 ? `Menampilkan semua indikator kinerja (${filteredItems.length} entri)`
-                : `Indikator aktif: ${selectedIndicator} (${filteredItems.length} entri)`}
+                : `Indikator aktif: ${activeIndicatorClean} (${filteredItems.length} entri)`}
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {items.length > 0 && indicators.length > 1 && (
               <div className="flex items-center rounded-lg bg-slate-100 p-0.5 text-xs">
                 <button
                   type="button"
-                  onClick={() => setShowAllIndicatorsInList(false)}
+                  onClick={() => {
+                    setShowAllIndicatorsInList(false);
+                    if (selectedIndicator === ALL_INDICATORS) {
+                      onSelectIndicator(activeIndicatorClean);
+                    }
+                  }}
                   className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
-                    !showAllIndicatorsInList
+                    !showAllIndicatorsInList && selectedIndicator !== ALL_INDICATORS
                       ? 'bg-white text-slate-900 shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
@@ -534,7 +605,7 @@ export function MonthEditor({
                   Indikator Dipilih ({
                     items.filter(
                       (i) =>
-                        ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === selectedIndicator
+                        ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === activeIndicatorClean
                     ).length
                   })
                 </button>
@@ -542,7 +613,7 @@ export function MonthEditor({
                   type="button"
                   onClick={() => setShowAllIndicatorsInList(true)}
                   className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
-                    showAllIndicatorsInList
+                    showAllIndicatorsInList || selectedIndicator === ALL_INDICATORS
                       ? 'bg-white text-slate-900 shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
@@ -551,6 +622,48 @@ export function MonthEditor({
                 </button>
               </div>
             )}
+
+            {filteredItems.length > 0 && (
+              confirmDeleteAllMonth ? (
+                <div className="flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1">
+                  <span className="text-xs font-medium text-rose-800">
+                    Hapus {filteredItems.length} foto bulan {currentMonth.name}?
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDeleteMonthItems(
+                        monthIndex,
+                        showAllIndicatorsInList || selectedIndicator === ALL_INDICATORS
+                          ? undefined
+                          : activeIndicatorClean
+                      );
+                      setDraftDesc('');
+                      setConfirmDeleteAllMonth(false);
+                    }}
+                    className="rounded-md bg-rose-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-800 transition-colors"
+                  >
+                    Ya, Hapus Semua
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteAllMonth(false)}
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                  >
+                    Batal
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteAllMonth(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition-colors"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>Hapus Semua Foto Bulan {currentMonth.name}</span>
+                </button>
+              )
+            )}
           </div>
         </div>
 
@@ -558,7 +671,7 @@ export function MonthEditor({
           <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
             <p className="text-sm font-medium text-slate-700">
               Belum ada foto bukti dukung pada bulan {currentMonth.name} {year} untuk indikator{' '}
-              <span className="font-semibold text-slate-900">&ldquo;{selectedIndicator}&rdquo;</span>.
+              <span className="font-semibold text-slate-900">&ldquo;{activeIndicatorClean}&rdquo;</span>.
             </p>
             <p className="mt-1 text-xs text-slate-500 max-w-md mx-auto">
               Unggah foto kegiatan di formulir atas atau seret beberapa gambar sekaligus ke area unggah.
@@ -588,8 +701,13 @@ export function MonthEditor({
                     referrerPolicy="no-referrer"
                     className="max-h-full max-w-full object-contain"
                   />
-                  <span className="absolute top-2.5 left-2.5 rounded bg-slate-900/80 px-2 py-0.5 font-mono text-xs font-medium tabular-nums text-white">
-                    #{idx + 1}
+                  <span
+                    className="absolute top-2.5 left-2.5 z-10 inline-flex h-7 min-w-7 items-center justify-center rounded-lg border-2 border-white px-2 font-display text-xs font-bold tabular-nums text-white shadow-md"
+                    style={{
+                      background: 'linear-gradient(135deg, #0F4C81 0%, #0369A1 100%)',
+                    }}
+                  >
+                    {idx + 1}
                   </span>
                 </div>
 
@@ -618,15 +736,39 @@ export function MonthEditor({
                     </div>
 
                     <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label
+                          htmlFor={`desc-${item.id}`}
+                          className="block text-[11px] font-semibold text-slate-500"
+                        >
+                          Rencana Aksi (Bulan Ini) <span className="text-rose-600">*</span>
+                        </label>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
+                          <Lock className="h-2.5 w-2.5" />
+                          <span>Terkunci</span>
+                        </span>
+                      </div>
+                      <input
+                        id={`desc-${item.id}`}
+                        type="text"
+                        readOnly
+                        disabled
+                        value={item.description ?? ''}
+                        className="w-full rounded-md border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-600 cursor-not-allowed select-none"
+                      />
+                    </div>
+
+                    <div className="hidden">
                       <label
                         htmlFor={`title-${item.id}`}
                         className="block text-[11px] font-semibold text-slate-500 mb-1"
                       >
-                        Nama Bukti Dukung
+                        Nama Bukti Dukung <span className="text-rose-600">*</span>
                       </label>
                       <input
                         id={`title-${item.id}`}
                         type="text"
+                        required
                         value={item.title}
                         onChange={(e) => onUpdateItem(item.id, { title: e.target.value })}
                         placeholder="Masukkan nama bukti dukung"
@@ -634,67 +776,28 @@ export function MonthEditor({
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label
-                          htmlFor={`date-${item.id}`}
-                          className="block text-[11px] font-semibold text-slate-500 mb-1"
-                        >
-                          Tanggal
-                        </label>
-                        <input
-                          id={`date-${item.id}`}
-                          type="date"
-                          value={item.date ?? ''}
-                          onChange={(e) =>
-                            onUpdateItem(item.id, { date: e.target.value || undefined })
-                          }
-                          className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-mono text-slate-700 focus:border-sky-700 focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label
-                          htmlFor={`month-${item.id}`}
-                          className="block text-[11px] font-semibold text-slate-500 mb-1"
-                        >
-                          Pindah Bulan
-                        </label>
-                        <select
-                          id={`month-${item.id}`}
-                          value={item.month}
-                          onChange={(e) =>
-                            onMoveItemMonth(item.id, parseInt(e.target.value, 10))
-                          }
-                          className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-sky-700 focus:outline-none"
-                        >
-                          {MONTHS.map((m) => (
-                            <option key={m.index} value={m.index}>
-                              {m.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
                     <div>
                       <label
-                        htmlFor={`desc-${item.id}`}
+                        htmlFor={`month-${item.id}`}
                         className="block text-[11px] font-semibold text-slate-500 mb-1"
                       >
-                        Keterangan (Opsional)
+                        Bulan <span className="text-rose-600">*</span>
                       </label>
-                      <input
-                        id={`desc-${item.id}`}
-                        type="text"
-                        value={item.description ?? ''}
+                      <select
+                        id={`month-${item.id}`}
+                        required
+                        value={item.month}
                         onChange={(e) =>
-                          onUpdateItem(item.id, {
-                            description: e.target.value || undefined,
-                          })
+                          onMoveItemMonth(item.id, parseInt(e.target.value, 10))
                         }
-                        placeholder="Catatan tambahan singkat"
-                        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 focus:border-sky-700 focus:outline-none"
-                      />
+                        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-sky-700 focus:outline-none"
+                      >
+                        {MONTHS.map((m) => (
+                          <option key={m.index} value={m.index}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 

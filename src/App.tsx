@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, AlertCircle, X } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Database, RefreshCw, X } from 'lucide-react';
 import { DocumentPreview } from './components/DocumentPreview';
 import { MonthEditor } from './components/MonthEditor';
 import { MonthSidebar } from './components/MonthSidebar';
 import { ReportSettings } from './components/ReportSettings';
 import { TopBar, WorkspaceTab } from './components/TopBar';
 import {
+  ALL_INDICATORS,
   DEFAULT_INDICATOR,
   DEFAULT_METADATA,
   EvidenceItem,
+  formatIndicatorLabel,
   MONTHS,
   ReportMetadata,
   ReportState,
@@ -39,17 +41,34 @@ export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('editor');
   const [selectedMonth, setSelectedMonth] = useState<number>(1);
+  const [previewFilterTarget, setPreviewFilterTarget] = useState<string>('all');
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ current: number; total: number } | null>(
     null
   );
   const [notice, setNotice] = useState<NoticeBanner | null>(null);
+  const [dbError, setDbError] = useState<string | null>(null);
+  const [isRetryingDb, setIsRetryingDb] = useState(false);
+
+  const fetchFromDatabase = useCallback(async () => {
+    setIsRetryingDb(true);
+    try {
+      const loaded = await loadReportState();
+      setState(loaded.state);
+      setDbError(loaded.dbError);
+      setIsLoaded(true);
+      return loaded.dbError === null;
+    } finally {
+      setIsRetryingDb(false);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
     loadReportState().then((loaded) => {
       if (active) {
-        setState(loaded);
+        setState(loaded.state);
+        setDbError(loaded.dbError);
         setIsLoaded(true);
       }
     });
@@ -59,12 +78,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || dbError) return;
     const timer = window.setTimeout(() => {
-      void saveReportState(state);
+      saveReportState(state)
+        .then(() => {
+          setDbError(null);
+        })
+        .catch((err) => {
+          setDbError(
+            err instanceof Error
+              ? err.message
+              : 'Koneksi ke database MySQL terputus. Pastikan MySQL 8.4.13 aktif.'
+          );
+        });
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [state, isLoaded]);
+  }, [state, isLoaded, dbError]);
 
   useEffect(() => {
     if (!notice) return;
@@ -72,12 +101,25 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  const selectedIndicatorItems = useMemo(
-    () => filterItemsByIndicator(state.items, state.metadata.selectedIndicator),
-    [state.items, state.metadata.selectedIndicator]
+  const currentYearItems = useMemo(
+    () => state.items.filter((i) => (Number(i.year) || 2026) === state.metadata.year),
+    [state.items, state.metadata.year]
   );
 
-  const groupedByMonthAll = useMemo(() => groupItemsByMonth(state.items), [state.items]);
+  const selectedIndicatorItems = useMemo(
+    () =>
+      filterItemsByIndicator(
+        currentYearItems,
+        state.metadata.selectedIndicator,
+        state.metadata.year
+      ),
+    [currentYearItems, state.metadata.selectedIndicator, state.metadata.year]
+  );
+
+  const groupedByMonthAll = useMemo(
+    () => groupItemsByMonth(currentYearItems),
+    [currentYearItems]
+  );
   const groupedByMonthIndicator = useMemo(
     () => groupItemsByMonth(selectedIndicatorItems),
     [selectedIndicatorItems]
@@ -86,10 +128,10 @@ export default function App() {
   const monthCounts = useMemo(() => {
     const map = new Map<number, number>();
     for (const m of MONTHS) {
-      map.set(m.index, (groupedByMonthIndicator.get(m.index) ?? []).length);
+      map.set(m.index, (groupedByMonthAll.get(m.index) ?? []).length);
     }
     return map;
-  }, [groupedByMonthIndicator]);
+  }, [groupedByMonthAll]);
 
   const annualPages = useMemo(
     () => buildAnnualPages(state.metadata, state.items),
@@ -214,27 +256,83 @@ export default function App() {
   const handleAddItems = useCallback(
     (newEntries: Omit<EvidenceItem, 'id' | 'order' | 'createdAt'>[]) => {
       setState((prev) => {
-        const currentMonthItems = prev.items.filter((i) => i.month === selectedMonth);
-        let nextOrder =
-          currentMonthItems.length > 0
-            ? Math.max(...currentMonthItems.map((i) => i.order)) + 1
-            : 0;
         const now = Date.now();
-        const created: EvidenceItem[] = newEntries.map((entry, idx) => ({
-          ...entry,
-          indicator:
-            entry.indicator?.trim() || prev.metadata.selectedIndicator || DEFAULT_INDICATOR,
-          id: `ev-${now}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
-          order: nextOrder + idx,
-          createdAt: now + idx,
-        }));
+        const nextOrderByYearMonth = new Map<string, number>();
+        const getNextOrder = (y: number, m: number) => {
+          const key = `${y}:${m}`;
+          if (!nextOrderByYearMonth.has(key)) {
+            const monthItems = prev.items.filter(
+              (i) => (Number(i.year) || 2026) === y && i.month === m
+            );
+            const startOrder =
+              monthItems.length > 0 ? Math.max(...monthItems.map((i) => i.order)) + 1 : 0;
+            nextOrderByYearMonth.set(key, startOrder);
+          }
+          const order = nextOrderByYearMonth.get(key)!;
+          nextOrderByYearMonth.set(key, order + 1);
+          return order;
+        };
+
+        const created: EvidenceItem[] = newEntries.map((entry, idx) => {
+          const targetYear = Number(entry.year) || prev.metadata.year;
+          const targetMonth = entry.month || selectedMonth;
+          return {
+            ...entry,
+            year: targetYear,
+            month: targetMonth,
+            indicator:
+              entry.indicator?.trim() || prev.metadata.selectedIndicator || DEFAULT_INDICATOR,
+            id: `ev-${now}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+            order: getNextOrder(targetYear, targetMonth),
+            createdAt: now + idx,
+          };
+        });
+
+        // Ensure all photos in the same year, month & indicator share the newly provided Rencana Aksi
+        const actionPlanByYearMonthInd = new Map<string, string>();
+        for (const c of created) {
+          if (c.description?.trim()) {
+            const ind = (c.indicator ?? '').trim() || DEFAULT_INDICATOR;
+            actionPlanByYearMonthInd.set(`${c.year}:::${c.month}:::${ind}`, c.description.trim());
+          }
+        }
+
+        const updatedExisting = prev.items.map((item) => {
+          const itemYear = Number(item.year) || 2026;
+          const ind = (item.indicator ?? '').trim() || DEFAULT_INDICATOR;
+          const sharedPlan = actionPlanByYearMonthInd.get(`${itemYear}:::${item.month}:::${ind}`);
+          return sharedPlan ? { ...item, description: sharedPlan } : item;
+        });
+
         return {
           ...prev,
-          items: [...prev.items, ...created],
+          items: [...updatedExisting, ...created],
         };
       });
     },
     [selectedMonth]
+  );
+
+  const handleUpdateMonthActionPlan = useCallback(
+    (targetMonth: number, targetIndicator: string, actionPlan: string) => {
+      const cleanInd = targetIndicator.trim() || DEFAULT_INDICATOR;
+      setState((prev) => ({
+        ...prev,
+        items: prev.items.map((item) => {
+          const itemYear = Number(item.year) || 2026;
+          const itemInd = (item.indicator ?? '').trim() || DEFAULT_INDICATOR;
+          if (
+            itemYear === prev.metadata.year &&
+            item.month === targetMonth &&
+            itemInd === cleanInd
+          ) {
+            return { ...item, description: actionPlan };
+          }
+          return item;
+        }),
+      }));
+    },
+    []
   );
 
   const handleUpdateItem = useCallback((id: string, patch: Partial<EvidenceItem>) => {
@@ -251,14 +349,37 @@ export default function App() {
     }));
   }, []);
 
+  const handleDeleteMonthItems = useCallback((targetMonth: number, targetIndicator?: string) => {
+    const monthName = MONTHS.find((m) => m.index === targetMonth)?.name ?? `Bulan ${targetMonth}`;
+    setState((prev) => ({
+      ...prev,
+      items: prev.items.filter((item) => {
+        const itemYear = Number(item.year) || 2026;
+        if (itemYear !== prev.metadata.year) return true;
+        if (item.month !== targetMonth) return true;
+        if (targetIndicator) {
+          const itemInd = (item.indicator ?? '').trim() || DEFAULT_INDICATOR;
+          return itemInd !== (targetIndicator.trim() || DEFAULT_INDICATOR);
+        }
+        return false;
+      }),
+    }));
+    setNotice({
+      type: 'success',
+      message: `Seluruh daftar foto pada bulan ${monthName} berhasil dihapus.`,
+    });
+  }, []);
+
   const handleMoveItemOrder = useCallback((id: string, direction: 'up' | 'down') => {
     setState((prev) => {
       const target = prev.items.find((i) => i.id === id);
       if (!target) return prev;
+      const targetYear = Number(target.year) || 2026;
       const targetInd = (target.indicator ?? '').trim() || DEFAULT_INDICATOR;
       const siblings = prev.items
         .filter(
           (i) =>
+            (Number(i.year) || 2026) === targetYear &&
             i.month === target.month &&
             ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === targetInd
         )
@@ -286,7 +407,11 @@ export default function App() {
 
   const handleMoveItemMonth = useCallback((id: string, targetMonth: number) => {
     setState((prev) => {
-      const targetMonthItems = prev.items.filter((i) => i.month === targetMonth);
+      const targetItem = prev.items.find((i) => i.id === id);
+      const targetYear = Number(targetItem?.year) || prev.metadata.year;
+      const targetMonthItems = prev.items.filter(
+        (i) => (Number(i.year) || 2026) === targetYear && i.month === targetMonth
+      );
       const nextOrder =
         targetMonthItems.length > 0
           ? Math.max(...targetMonthItems.map((i) => i.order)) + 1
@@ -334,14 +459,16 @@ export default function App() {
     setNotice(null);
 
     try {
+      const activeFilter = activeTab === 'preview' ? previewFilterTarget : 'all';
       const result = await generateAndDownloadAnnualPdf(
         state.metadata,
         state.items,
-        (current, total) => setExportProgress({ current, total })
+        (current, total) => setExportProgress({ current, total }),
+        activeFilter
       );
       setNotice({
         type: 'success',
-        message: `Berhasil mengunduh ${result.fileName} (${result.totalPages} halaman F4 · Indikator: ${state.metadata.selectedIndicator}).`,
+        message: `Berhasil mengunduh ${result.fileName} (${result.totalPages} halaman F4 · Indikator: ${formatIndicatorLabel(state.metadata.selectedIndicator)}).`,
       });
     } catch (err) {
       setNotice({
@@ -355,7 +482,7 @@ export default function App() {
       setIsExporting(false);
       setExportProgress(null);
     }
-  }, [isExporting, state.metadata, state.items]);
+  }, [isExporting, state.metadata, state.items, activeTab, previewFilterTarget]);
 
   if (!isLoaded) {
     return (
@@ -388,6 +515,55 @@ export default function App() {
         exportProgress={exportProgress}
         canExport={annualPages.length > 0}
       />
+
+      {dbError && (
+        <div
+          role="alert"
+          className="border-b-2 border-rose-300 bg-rose-50 px-4 sm:px-6 py-4 text-rose-950 shadow-sm"
+        >
+          <div className="mx-auto max-w-6xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="rounded-lg bg-rose-100 p-2 text-rose-700 shrink-0 mt-0.5">
+                <Database className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-display text-sm font-bold text-rose-900">
+                    Koneksi Database MySQL Gagal (MySQL Belum Aktif)
+                  </span>
+                  <span className="rounded bg-rose-200/80 px-2 py-0.5 font-mono text-[11px] font-semibold text-rose-900">
+                    127.0.0.1:3306
+                  </span>
+                </div>
+                <p className="text-xs text-rose-800 leading-relaxed">
+                  {dbError}
+                </p>
+                <p className="text-[11px] text-rose-700/90 font-mono">
+                  Lokasi MySQL: C:\wamp64\bin\mysql\mysql8.4.13 · Pastikan Wampserver64 / service wampmysqld64 sudah berjalan, lalu klik tombol di samping.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={isRetryingDb}
+              onClick={async () => {
+                const ok = await fetchFromDatabase();
+                if (ok) {
+                  setNotice({
+                    type: 'success',
+                    message: 'Koneksi database MySQL berhasil dipulihkan.',
+                  });
+                }
+              }}
+              className="inline-flex items-center gap-2 rounded-lg bg-rose-800 px-3.5 py-2 text-xs font-semibold text-white hover:bg-rose-900 disabled:opacity-50 transition-colors whitespace-nowrap shrink-0"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRetryingDb ? 'animate-spin' : ''}`} />
+              <span>{isRetryingDb ? 'Menghubungkan...' : 'Coba Hubungkan Ulang'}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {notice && (
         <div
@@ -432,7 +608,7 @@ export default function App() {
             onSelectMonth={setSelectedMonth}
             monthCounts={monthCounts}
             totalPhotos={selectedIndicatorItems.length}
-            totalAllIndicatorPhotos={state.items.length}
+            totalAllIndicatorPhotos={currentYearItems.length}
             totalPages={annualPages.length}
             paperWidthMm={state.metadata.paperWidthMm}
           />
@@ -453,7 +629,9 @@ export default function App() {
               onSelectMonth={setSelectedMonth}
               onAddItems={handleAddItems}
               onUpdateItem={handleUpdateItem}
+              onUpdateMonthActionPlan={handleUpdateMonthActionPlan}
               onDeleteItem={handleDeleteItem}
+              onDeleteMonthItems={handleDeleteMonthItems}
               onMoveItemOrder={handleMoveItemOrder}
               onMoveItemMonth={handleMoveItemMonth}
             />
@@ -462,7 +640,7 @@ export default function App() {
           {activeTab === 'settings' && (
             <ReportSettings
               metadata={state.metadata}
-              items={state.items}
+              items={currentYearItems}
               onChangeMetadata={handleUpdateMetadata}
               onAddIndicator={handleAddIndicator}
               onEditIndicator={handleEditIndicator}
@@ -470,7 +648,7 @@ export default function App() {
               onDeleteAllOtherIndicators={handleDeleteAllOtherIndicators}
               onLoadSampleData={handleLoadSampleData}
               onResetAllData={handleResetAllData}
-              totalPhotos={state.items.length}
+              totalPhotos={currentYearItems.length}
             />
           )}
 
@@ -478,6 +656,8 @@ export default function App() {
             <DocumentPreview
               metadata={state.metadata}
               items={state.items}
+              filterTarget={previewFilterTarget}
+              onChangeFilterTarget={setPreviewFilterTarget}
               onChangeSelectedIndicator={(selectedIndicator) =>
                 handleUpdateMetadata({ selectedIndicator })
               }

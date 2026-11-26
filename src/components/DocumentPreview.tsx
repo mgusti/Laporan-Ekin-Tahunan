@@ -1,17 +1,26 @@
 import { useMemo, useState } from 'react';
 import { Download, Loader2, ZoomIn, ZoomOut } from 'lucide-react';
-import { EvidenceItem, MONTHS, PhotosPerPage, ReportMetadata } from '../types/ekinerja';
+import {
+  ALL_INDICATORS,
+  EvidenceItem,
+  formatIndicatorLabel,
+  MONTHS,
+  PhotosPerPage,
+  ReportMetadata,
+} from '../types/ekinerja';
 import {
   buildAnnualPages,
   F4Page,
   filterItemsByIndicator,
-  formatIndonesianDate,
   getEndOfDecemberDateLabel,
+  getReportTitleForFilter,
 } from '../utils/pdfLayout';
 
 interface DocumentPreviewProps {
   metadata: ReportMetadata;
   items: EvidenceItem[];
+  filterTarget: string;
+  onChangeFilterTarget: (target: string) => void;
   onChangeSelectedIndicator: (indicator: string) => void;
   onChangePhotosPerPage: (count: PhotosPerPage) => void;
   onDownloadPdf: () => void;
@@ -22,6 +31,8 @@ interface DocumentPreviewProps {
 export function DocumentPreview({
   metadata,
   items,
+  filterTarget,
+  onChangeFilterTarget,
   onChangeSelectedIndicator,
   onChangePhotosPerPage,
   onDownloadPdf,
@@ -29,12 +40,29 @@ export function DocumentPreview({
   onGoToEditor,
 }: DocumentPreviewProps) {
   const [zoom, setZoom] = useState<number>(0.78);
-  const [filterTarget, setFilterTarget] = useState<string>('all');
+
+  const selectedFilterMonthIndex = useMemo(() => {
+    if (filterTarget === 'all' || filterTarget === 'cover') return null;
+    const parsed = parseInt(filterTarget, 10);
+    return !Number.isNaN(parsed) && parsed >= 1 && parsed <= 12 ? parsed : null;
+  }, [filterTarget]);
+
+  const effectiveReportTitle = useMemo(
+    () => getReportTitleForFilter(metadata.reportTitle, metadata.year, selectedFilterMonthIndex),
+    [metadata.reportTitle, metadata.year, selectedFilterMonthIndex]
+  );
 
   const indicatorItems = useMemo(
-    () => filterItemsByIndicator(items, metadata.selectedIndicator),
-    [items, metadata.selectedIndicator]
+    () => filterItemsByIndicator(items, metadata.selectedIndicator, metadata.year),
+    [items, metadata.selectedIndicator, metadata.year]
   );
+  const scopeItems = useMemo(() => {
+    const yearItems = items.filter((i) => (Number(i.year) || 2026) === metadata.year);
+    if (selectedFilterMonthIndex !== null) {
+      return yearItems.filter((i) => i.month === selectedFilterMonthIndex);
+    }
+    return yearItems;
+  }, [items, metadata.year, selectedFilterMonthIndex]);
   const allPages = useMemo(() => buildAnnualPages(metadata, items), [metadata, items]);
 
   const visiblePages = useMemo(() => {
@@ -52,44 +80,61 @@ export function DocumentPreview({
   const pageWidthPx = Math.round(baseWidthPx * zoom);
   const pageHeightPx = Math.round((pageWidthPx * 330) / metadata.paperWidthMm);
 
-  const identityParts: string[] = [`Tahun Laporan: ${metadata.year}`];
+  const identityParts: string[] = [];
   if (metadata.employeeName.trim()) identityParts.push(metadata.employeeName.trim());
   if (metadata.nip.trim()) identityParts.push(`NIP. ${metadata.nip.trim()}`);
   if (metadata.unit.trim()) identityParts.push(metadata.unit.trim());
 
-  const renderPageHeader = (subtitle: string) => (
-    <div style={{ marginBottom: `${Math.round(14 * zoom)}px` }}>
-      <div
-        className="font-bold uppercase tracking-tight text-slate-900"
-        style={{ fontSize: `${12.5 * zoom}px`, lineHeight: 1.25 }}
-      >
-        {metadata.reportTitle || 'Laporan Foto Bukti Dukung E-Kinerja Tahunan'}
+  const renderPageHeader = (
+    monthName: string,
+    pageIndicator: string,
+    suffix: string = '',
+    actionPlan?: string
+  ) => {
+    const indicatorText = `Indikator: ${pageIndicator.trim() || '—'}`;
+    const subtitleLine = selectedFilterMonthIndex
+      ? `${indicatorText}${suffix}`
+      : `Bulan: ${monthName}${suffix} · ${indicatorText}`;
+
+    return (
+      <div style={{ marginBottom: `${Math.round(12 * zoom)}px` }}>
+        <div
+          className="font-bold tracking-tight text-slate-900"
+          style={{ fontSize: `${13 * zoom}px`, lineHeight: 1.25 }}
+        >
+          {effectiveReportTitle}
+        </div>
+        <div
+          className="text-slate-600 truncate"
+          style={{ fontSize: `${9.5 * zoom}px`, marginTop: `${2 * zoom}px` }}
+        >
+          {identityParts.join(' | ')}
+        </div>
+        <div
+          style={{
+            height: `${Math.max(1.5, 2 * zoom)}px`,
+            backgroundColor: '#0F4C81',
+            marginTop: `${6 * zoom}px`,
+            marginBottom: `${7 * zoom}px`,
+          }}
+        />
+        <div
+          className="font-bold text-[#0F4C81] truncate"
+          style={{ fontSize: `${11 * zoom}px`, lineHeight: 1.3 }}
+        >
+          {subtitleLine}
+        </div>
+        {actionPlan?.trim() && (
+          <div
+            className="font-semibold text-slate-700 truncate"
+            style={{ fontSize: `${9.8 * zoom}px`, marginTop: `${2.5 * zoom}px`, lineHeight: 1.3 }}
+          >
+            Rencana Aksi: {actionPlan.trim()}
+          </div>
+        )}
       </div>
-      <div
-        className="text-slate-600 truncate"
-        style={{ fontSize: `${9.5 * zoom}px`, marginTop: `${2 * zoom}px` }}
-      >
-        {identityParts.join('  |  ')}
-      </div>
-      <div
-        style={{
-          height: `${Math.max(1.5, 2 * zoom)}px`,
-          backgroundColor: '#0F4C81',
-          marginTop: `${6 * zoom}px`,
-          marginBottom: `${8 * zoom}px`,
-        }}
-      />
-      <div
-        className="font-bold text-[#0F4C81] truncate"
-        style={{ fontSize: `${11.5 * zoom}px` }}
-      >
-        {subtitle}
-        {metadata.selectedIndicator.trim()
-          ? `  ·  Indikator: ${metadata.selectedIndicator.trim()}`
-          : ''}
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderPageFooter = (pageNumber: number, totalPages: number) => (
     <div
@@ -129,7 +174,7 @@ export function DocumentPreview({
         className="font-bold text-slate-900 leading-tight"
         style={{ fontSize: `${21 * zoom}px`, marginBottom: `${6 * zoom}px` }}
       >
-        {metadata.reportTitle || 'Laporan Foto Bukti Dukung E-Kinerja Tahunan'}
+        {effectiveReportTitle}
       </div>
 
       <div
@@ -153,7 +198,12 @@ export function DocumentPreview({
           ['NIP / Identitas', metadata.nip.trim() || '—'],
           ['Jabatan', metadata.position.trim() || '—'],
           ['Unit Kerja / Instansi', metadata.unit.trim() || '—'],
-          ['Indikator Kinerja', metadata.selectedIndicator.trim() || '—'],
+          [
+            'Indikator Kinerja',
+            metadata.selectedIndicator === ALL_INDICATORS
+              ? `Semua Indikator (${metadata.indicators.length} Indikator)`
+              : metadata.selectedIndicator.trim() || '—',
+          ],
         ].map(([label, val]) => (
           <div
             key={label}
@@ -268,7 +318,7 @@ export function DocumentPreview({
 
     return (
       <div className="flex flex-col h-full">
-        {renderPageHeader(`Bulan: ${page.month.name} ${metadata.year}${suffix}`)}
+        {renderPageHeader(page.month.name, page.indicator, suffix, page.actionPlan)}
 
         <div
           className={`flex-1 grid ${gridColsClass} ${gridRowsClass} min-h-0`}
@@ -280,43 +330,35 @@ export function DocumentPreview({
           {page.items.map((item, idx) => (
             <div
               key={item.id}
-              className="border border-slate-300 bg-white flex flex-col min-h-0 overflow-hidden"
+              className="relative border border-slate-300 bg-slate-50/70 flex items-center justify-center min-h-0 overflow-hidden rounded-sm"
+              style={{ padding: `${7 * zoom}px` }}
             >
+              {/* Top-left number badge */}
               <div
-                className="flex-1 bg-slate-50 flex items-center justify-center min-h-0"
-                style={{ padding: `${6 * zoom}px` }}
+                className="absolute z-10 flex items-center justify-center font-display font-bold tabular-nums text-white select-none"
+                style={{
+                  top: `${8 * zoom}px`,
+                  left: `${8 * zoom}px`,
+                  minWidth: `${26 * zoom}px`,
+                  height: `${26 * zoom}px`,
+                  padding: `0 ${7 * zoom}px`,
+                  borderRadius: `${7 * zoom}px`,
+                  background: 'linear-gradient(135deg, #0F4C81 0%, #0369A1 100%)',
+                  border: `${Math.max(1.5, 1.8 * zoom)}px solid #FFFFFF`,
+                  boxShadow: '0 2px 6px rgba(15, 23, 42, 0.28)',
+                  fontSize: `${11 * zoom}px`,
+                  lineHeight: 1,
+                }}
               >
-                <img
-                  src={item.imageDataUrl}
-                  alt={item.title}
-                  referrerPolicy="no-referrer"
-                  className="max-h-full max-w-full object-contain"
-                />
+                {page.startItemNumber + idx}
               </div>
-              <div
-                className="border-t border-slate-200 bg-white shrink-0"
-                style={{ padding: `${6 * zoom}px ${8 * zoom}px` }}
-              >
-                <div
-                  className="font-bold text-slate-900 line-clamp-2"
-                  style={{ fontSize: `${9.8 * zoom}px`, lineHeight: 1.3 }}
-                >
-                  {page.startItemNumber + idx}. {item.title || 'Bukti Dukung E-Kinerja'}
-                </div>
-                {(item.date || item.description) && (
-                  <div
-                    className="text-slate-500 truncate"
-                    style={{ fontSize: `${8.4 * zoom}px`, marginTop: `${2 * zoom}px` }}
-                  >
-                    {[
-                      item.date ? formatIndonesianDate(item.date) : '',
-                      item.description?.trim() ?? '',
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </div>
-                )}
-              </div>
+
+              <img
+                src={item.imageDataUrl}
+                alt={`Bukti dukung ${page.startItemNumber + idx}`}
+                referrerPolicy="no-referrer"
+                className="max-h-full max-w-full object-contain"
+              />
             </div>
           ))}
         </div>
@@ -328,7 +370,7 @@ export function DocumentPreview({
 
   const renderEmptyMonthPage = (page: Extract<F4Page, { type: 'month-empty' }>) => (
     <div className="flex flex-col h-full">
-      {renderPageHeader(`Bulan: ${page.month.name} ${metadata.year}`)}
+      {renderPageHeader(page.month.name, page.indicator)}
 
       <div
         className="border border-slate-300 bg-slate-50 text-center"
@@ -374,13 +416,20 @@ export function DocumentPreview({
               aria-label="Pilih Indikator Kinerja yang dicetak"
               value={metadata.selectedIndicator}
               onChange={(e) => onChangeSelectedIndicator(e.target.value)}
-              className="max-w-[260px] rounded-lg border border-sky-700/40 bg-sky-50/60 px-2.5 py-1.5 text-xs font-semibold text-sky-950 focus:border-sky-700 focus:outline-none"
+              className="max-w-[280px] rounded-lg border border-sky-700/40 bg-sky-50/60 px-2.5 py-1.5 text-xs font-semibold text-sky-950 focus:border-sky-700 focus:outline-none"
             >
+              <option value={ALL_INDICATORS}>
+                Semua Indikator ({scopeItems.length} foto
+                {selectedFilterMonthIndex
+                  ? ` Bulan ${MONTHS.find((m) => m.index === selectedFilterMonthIndex)?.name ?? ''}`
+                  : ''}
+                )
+              </option>
               {metadata.indicators.map((ind) => {
-                const count = filterItemsByIndicator(items, ind).length;
+                const count = filterItemsByIndicator(scopeItems, ind, metadata.year).length;
                 return (
                   <option key={ind} value={ind}>
-                    {ind} ({count} foto)
+                    {formatIndicatorLabel(ind)} ({count} foto)
                   </option>
                 );
               })}
@@ -391,7 +440,7 @@ export function DocumentPreview({
           <select
             aria-label="Filter halaman pratinjau"
             value={filterTarget}
-            onChange={(e) => setFilterTarget(e.target.value)}
+            onChange={(e) => onChangeFilterTarget(e.target.value)}
             className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-sky-700 focus:outline-none"
           >
             <option value="all">Semua Halaman ({allPages.length})</option>
@@ -474,7 +523,7 @@ export function DocumentPreview({
               {filterTarget !== 'all' && (
                 <button
                   type="button"
-                  onClick={() => setFilterTarget('all')}
+                  onClick={() => onChangeFilterTarget('all')}
                   className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
                 >
                   Tampilkan Semua

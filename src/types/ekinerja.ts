@@ -20,6 +20,14 @@ export const MONTHS: MonthDefinition[] = [
 ];
 
 export const DEFAULT_INDICATOR = 'Permintaan perbaikan perangkat keras/jaringan';
+export const ALL_INDICATORS = '__ALL_INDICATORS__';
+
+export function formatIndicatorLabel(indicator: string): string {
+  if (indicator === ALL_INDICATORS) {
+    return 'Semua Indikator';
+  }
+  return indicator.trim() || DEFAULT_INDICATOR;
+}
 
 export function validateIndicatorName(
   rawName: string,
@@ -46,11 +54,12 @@ export function validateIndicatorName(
 
 export interface EvidenceItem {
   id: string;
+  year: number; // Tahun laporan (misal: 2026, 2027)
   month: number; // 1..12
   indicator: string; // Indikator Kinerja
   title: string; // Nama Bukti Dukung
-  description?: string; // Uraian singkat (opsional)
-  date?: string; // Tanggal kegiatan (opsional)
+  description?: string; // Rencana Aksi
+  date?: string; // Tanggal kegiatan (legacy)
   imageDataUrl: string;
   imageWidth: number;
   imageHeight: number;

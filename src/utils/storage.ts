@@ -1,4 +1,5 @@
 import {
+  ALL_INDICATORS,
   DEFAULT_INDICATOR,
   DEFAULT_METADATA,
   EvidenceItem,
@@ -57,11 +58,25 @@ async function loadLegacyIndexedDbState(): Promise<ReportState | null> {
   }
 }
 
-export async function loadReportState(): Promise<ReportState> {
+export interface LoadReportResult {
+  state: ReportState;
+  dbError: string | null;
+}
+
+export async function loadReportState(): Promise<LoadReportResult> {
   try {
     const res = await fetch('/api/report', { method: 'GET' });
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
+      let serverMsg = `HTTP ${res.status}`;
+      try {
+        const errJson = (await res.json()) as { error?: string };
+        if (errJson?.error) {
+          serverMsg = errJson.error;
+        }
+      } catch {
+        // Ignore JSON parse fallback
+      }
+      throw new Error(serverMsg);
     }
     const data = (await res.json()) as {
       metadata: ReportMetadata | null;
@@ -85,13 +100,16 @@ export async function loadReportState(): Promise<ReportState> {
       }
       return {
         ...item,
+        year: Number(item.year) || 2026,
         indicator: ind,
       };
     });
 
-    const selectedIndicator = indicators.includes(baseMetadata.selectedIndicator)
-      ? baseMetadata.selectedIndicator
-      : indicators[0] || DEFAULT_INDICATOR;
+    const selectedIndicator =
+      baseMetadata.selectedIndicator === ALL_INDICATORS ||
+      indicators.includes(baseMetadata.selectedIndicator)
+        ? baseMetadata.selectedIndicator
+        : indicators[0] || DEFAULT_INDICATOR;
 
     const metadata: ReportMetadata = {
       ...baseMetadata,
@@ -116,7 +134,7 @@ export async function loadReportState(): Promise<ReportState> {
           items: legacy.items,
         };
         await saveReportState(migratedState);
-        return migratedState;
+        return { state: migratedState, dbError: null };
       }
     }
 
@@ -125,11 +143,18 @@ export async function loadReportState(): Promise<ReportState> {
       syncedImageSignatures.set(item.id, getImageSignature(item.imageDataUrl));
     }
 
-    return { metadata, items };
+    return { state: { metadata, items }, dbError: null };
   } catch (err) {
     console.error('Gagal memuat dari database MySQL, beralih ke cadangan lokal:', err);
+    const dbErrorMsg =
+      err instanceof Error
+        ? err.message
+        : 'Tidak dapat terhubung ke database MySQL. Pastikan WAMP Server / MySQL 8.4.13 sudah aktif.';
     const legacy = await loadLegacyIndexedDbState();
-    return legacy ?? { metadata: { ...DEFAULT_METADATA }, items: [] };
+    return {
+      state: legacy ?? { metadata: { ...DEFAULT_METADATA }, items: [] },
+      dbError: dbErrorMsg,
+    };
   }
 }
 
@@ -153,7 +178,16 @@ export async function saveReportState(state: ReportState): Promise<void> {
   });
 
   if (!res.ok) {
-    throw new Error(`Gagal menyimpan ke database MySQL (HTTP ${res.status})`);
+    let serverMsg = `Gagal menyimpan ke database MySQL (HTTP ${res.status})`;
+    try {
+      const errJson = (await res.json()) as { error?: string };
+      if (errJson?.error) {
+        serverMsg = errJson.error;
+      }
+    } catch {
+      // Ignore JSON parse fallback
+    }
+    throw new Error(serverMsg);
   }
 
   const nextMap = new Map<string, string>();

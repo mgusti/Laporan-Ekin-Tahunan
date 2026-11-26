@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Check, Minus, Plus } from 'lucide-react';
-import { MONTHS, validateIndicatorName } from '../types/ekinerja';
+import { ALL_INDICATORS, MONTHS, validateIndicatorName } from '../types/ekinerja';
 
 interface MonthSidebarProps {
   year: number;
@@ -121,6 +121,7 @@ export function MonthSidebar({
             onChange={(e) => onSelectIndicator(e.target.value)}
             className="w-full rounded-lg border border-sky-700/40 bg-sky-50/50 px-2.5 py-2 text-xs font-medium text-slate-900 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-700/20"
           >
+            <option value={ALL_INDICATORS}>Semua Indikator</option>
             {indicators.map((ind) => (
               <option key={ind} value={ind}>
                 {ind}
