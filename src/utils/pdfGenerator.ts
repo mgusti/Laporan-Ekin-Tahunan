@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import {
   ALL_INDICATORS,
+  DEFAULT_INDICATOR,
   EvidenceItem,
   formatIndicatorLabel,
   MONTHS,
@@ -22,8 +23,7 @@ function drawHeader(
   doc: jsPDF,
   metadata: ReportMetadata,
   pageWidth: number,
-  subtitleLine: string,
-  actionPlan?: string
+  subtitleLine?: string
 ) {
   const contentWidth = pageWidth - MARGIN_X * 2;
 
@@ -53,22 +53,13 @@ function drawHeader(
   doc.setLineWidth(0.6);
   doc.line(MARGIN_X, MARGIN_TOP + 10.5, pageWidth - MARGIN_X, MARGIN_TOP + 10.5);
 
-  // Section subtitle (Indikator or Bulan · Indikator)
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(15, 76, 129);
-  const fullSubtitle =
-    doc.splitTextToSize(subtitleLine, contentWidth)[0] ?? subtitleLine;
-  doc.text(fullSubtitle, MARGIN_X, MARGIN_TOP + 16);
-
-  // Rencana Aksi right below Indikator
-  if (actionPlan?.trim()) {
+  if (subtitleLine?.trim()) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.8);
-    doc.setTextColor(51, 65, 85);
-    const actionLine =
-      doc.splitTextToSize(`Rencana Aksi: ${actionPlan.trim()}`, contentWidth)[0] ?? '';
-    doc.text(actionLine, MARGIN_X, MARGIN_TOP + 21);
+    doc.setFontSize(10);
+    doc.setTextColor(15, 76, 129);
+    const fullSubtitle =
+      doc.splitTextToSize(subtitleLine.trim(), contentWidth)[0] ?? subtitleLine.trim();
+    doc.text(fullSubtitle, MARGIN_X, MARGIN_TOP + 16);
   }
 }
 
@@ -279,15 +270,20 @@ function drawPhotoCard(
 ) {
   // Card border
   doc.setDrawColor(203, 213, 225);
-  doc.setFillColor(248, 250, 252);
+  doc.setFillColor(255, 255, 255);
   doc.setLineWidth(0.35);
   doc.rect(x, y, w, h, 'FD');
 
+  const captionH = 14.5;
   const imgPad = 2.5;
   const imgBoxX = x + imgPad;
   const imgBoxY = y + imgPad;
   const imgBoxW = w - imgPad * 2;
-  const imgBoxH = h - imgPad * 2;
+  const imgBoxH = h - captionH - imgPad * 2;
+
+  // Neutral image mat
+  doc.setFillColor(248, 250, 252);
+  doc.rect(imgBoxX, imgBoxY, imgBoxW, imgBoxH, 'F');
 
   // Fit image inside imgBox preserving aspect ratio
   const imgRatio = item.imageWidth / Math.max(1, item.imageHeight);
@@ -342,6 +338,27 @@ function drawPhotoCard(
   doc.text(label, badgeX + badgeW / 2, badgeY + badgeH / 2 + 1.1, {
     align: 'center',
   });
+
+  // Divider above per-photo Indikator & Rencana Aksi caption
+  const capTop = y + h - captionH;
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.25);
+  doc.line(x, capTop, x + w, capTop);
+
+  const itemIndicator = (item.indicator ?? '').trim() || DEFAULT_INDICATOR;
+  const itemActionPlan = item.description?.trim() || '—';
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.8);
+  doc.setTextColor(15, 76, 129);
+  const indLine = doc.splitTextToSize(`Indikator: ${itemIndicator}`, w - 6)[0] ?? '';
+  doc.text(indLine, x + 3, capTop + 5.2);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(51, 65, 85);
+  const actLine = doc.splitTextToSize(`Rencana Aksi: ${itemActionPlan}`, w - 6)[0] ?? '';
+  doc.text(actLine, x + 3, capTop + 10.6);
 }
 
 function drawMonthPhotosPage(
@@ -354,20 +371,13 @@ function drawMonthPhotosPage(
   const contentWidth = pageWidth - MARGIN_X * 2;
   const monthSuffix =
     page.monthTotalPages > 1 ? ` (Bagian ${page.monthPageIndex} dari ${page.monthTotalPages})` : '';
-  const indicatorText = `Indikator: ${page.indicator.trim() || '—'}`;
   const subtitleLine = isSingleMonthFilter
-    ? `${indicatorText}${monthSuffix}`
-    : `Bulan: ${page.month.name}${monthSuffix} · ${indicatorText}`;
+    ? monthSuffix.trim()
+    : `Bulan: ${page.month.name}${monthSuffix}`;
 
-  drawHeader(
-    doc,
-    metadata,
-    pageWidth,
-    subtitleLine,
-    page.actionPlan
-  );
+  drawHeader(doc, metadata, pageWidth, subtitleLine);
 
-  const gridTop = page.actionPlan?.trim() ? MARGIN_TOP + 25.5 : MARGIN_TOP + 22;
+  const gridTop = subtitleLine ? MARGIN_TOP + 21 : MARGIN_TOP + 15.5;
   const gridBottom = F4_HEIGHT_MM - MARGIN_BOTTOM - 8;
   const gridHeight = gridBottom - gridTop;
 
@@ -405,10 +415,7 @@ function drawEmptyMonthPage(
 ) {
   const pageWidth = metadata.paperWidthMm;
   const contentWidth = pageWidth - MARGIN_X * 2;
-  const indicatorText = `Indikator: ${page.indicator.trim() || '—'}`;
-  const subtitleLine = isSingleMonthFilter
-    ? indicatorText
-    : `Bulan: ${page.month.name} · ${indicatorText}`;
+  const subtitleLine = isSingleMonthFilter ? '' : `Bulan: ${page.month.name}`;
   drawHeader(doc, metadata, pageWidth, subtitleLine);
 
   const boxY = MARGIN_TOP + 34;

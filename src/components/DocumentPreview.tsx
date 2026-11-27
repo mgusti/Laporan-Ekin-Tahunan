@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Download, Loader2, ZoomIn, ZoomOut } from 'lucide-react';
 import {
   ALL_INDICATORS,
+  DEFAULT_INDICATOR,
   EvidenceItem,
   formatIndicatorLabel,
   MONTHS,
@@ -85,16 +86,10 @@ export function DocumentPreview({
   if (metadata.nip.trim()) identityParts.push(`NIP. ${metadata.nip.trim()}`);
   if (metadata.unit.trim()) identityParts.push(metadata.unit.trim());
 
-  const renderPageHeader = (
-    monthName: string,
-    pageIndicator: string,
-    suffix: string = '',
-    actionPlan?: string
-  ) => {
-    const indicatorText = `Indikator: ${pageIndicator.trim() || '—'}`;
+  const renderPageHeader = (monthName: string, suffix: string = '') => {
     const subtitleLine = selectedFilterMonthIndex
-      ? `${indicatorText}${suffix}`
-      : `Bulan: ${monthName}${suffix} · ${indicatorText}`;
+      ? suffix.trim()
+      : `Bulan: ${monthName}${suffix}`;
 
     return (
       <div style={{ marginBottom: `${Math.round(12 * zoom)}px` }}>
@@ -115,21 +110,15 @@ export function DocumentPreview({
             height: `${Math.max(1.5, 2 * zoom)}px`,
             backgroundColor: '#0F4C81',
             marginTop: `${6 * zoom}px`,
-            marginBottom: `${7 * zoom}px`,
+            marginBottom: subtitleLine ? `${7 * zoom}px` : `${2 * zoom}px`,
           }}
         />
-        <div
-          className="font-bold text-[#0F4C81] truncate"
-          style={{ fontSize: `${11 * zoom}px`, lineHeight: 1.3 }}
-        >
-          {subtitleLine}
-        </div>
-        {actionPlan?.trim() && (
+        {subtitleLine && (
           <div
-            className="font-semibold text-slate-700 truncate"
-            style={{ fontSize: `${9.8 * zoom}px`, marginTop: `${2.5 * zoom}px`, lineHeight: 1.3 }}
+            className="font-bold text-[#0F4C81] truncate"
+            style={{ fontSize: `${11 * zoom}px`, lineHeight: 1.3 }}
           >
-            Rencana Aksi: {actionPlan.trim()}
+            {subtitleLine}
           </div>
         )}
       </div>
@@ -318,7 +307,7 @@ export function DocumentPreview({
 
     return (
       <div className="flex flex-col h-full">
-        {renderPageHeader(page.month.name, page.indicator, suffix, page.actionPlan)}
+        {renderPageHeader(page.month.name, suffix)}
 
         <div
           className={`flex-1 grid ${gridColsClass} ${gridRowsClass} min-h-0`}
@@ -327,40 +316,73 @@ export function DocumentPreview({
             marginBottom: `${12 * zoom}px`,
           }}
         >
-          {page.items.map((item, idx) => (
-            <div
-              key={item.id}
-              className="relative border border-slate-300 bg-slate-50/70 flex items-center justify-center min-h-0 overflow-hidden rounded-sm"
-              style={{ padding: `${7 * zoom}px` }}
-            >
-              {/* Top-left number badge */}
+          {page.items.map((item, idx) => {
+            const itemIndicator = (item.indicator ?? '').trim() || DEFAULT_INDICATOR;
+            const itemActionPlan = item.description?.trim() || '—';
+            return (
               <div
-                className="absolute z-10 flex items-center justify-center font-display font-bold tabular-nums text-white select-none"
-                style={{
-                  top: `${8 * zoom}px`,
-                  left: `${8 * zoom}px`,
-                  minWidth: `${26 * zoom}px`,
-                  height: `${26 * zoom}px`,
-                  padding: `0 ${7 * zoom}px`,
-                  borderRadius: `${7 * zoom}px`,
-                  background: 'linear-gradient(135deg, #0F4C81 0%, #0369A1 100%)',
-                  border: `${Math.max(1.5, 1.8 * zoom)}px solid #FFFFFF`,
-                  boxShadow: '0 2px 6px rgba(15, 23, 42, 0.28)',
-                  fontSize: `${11 * zoom}px`,
-                  lineHeight: 1,
-                }}
+                key={item.id}
+                className="border border-slate-300 bg-white flex flex-col min-h-0 overflow-hidden rounded-sm"
               >
-                {page.startItemNumber + idx}
-              </div>
+                <div
+                  className="relative flex-1 bg-slate-50/70 flex items-center justify-center min-h-0 overflow-hidden"
+                  style={{ padding: `${7 * zoom}px` }}
+                >
+                  {/* Top-left number badge */}
+                  <div
+                    className="absolute z-10 flex items-center justify-center font-display font-bold tabular-nums text-white select-none"
+                    style={{
+                      top: `${8 * zoom}px`,
+                      left: `${8 * zoom}px`,
+                      minWidth: `${26 * zoom}px`,
+                      height: `${26 * zoom}px`,
+                      padding: `0 ${7 * zoom}px`,
+                      borderRadius: `${7 * zoom}px`,
+                      background: 'linear-gradient(135deg, #0F4C81 0%, #0369A1 100%)',
+                      border: `${Math.max(1.5, 1.8 * zoom)}px solid #FFFFFF`,
+                      boxShadow: '0 2px 6px rgba(15, 23, 42, 0.28)',
+                      fontSize: `${11 * zoom}px`,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {page.startItemNumber + idx}
+                  </div>
 
-              <img
-                src={item.imageDataUrl}
-                alt={`Bukti dukung ${page.startItemNumber + idx}`}
-                referrerPolicy="no-referrer"
-                className="max-h-full max-w-full object-contain"
-              />
-            </div>
-          ))}
+                  <img
+                    src={item.imageDataUrl}
+                    alt={`Bukti dukung ${page.startItemNumber + idx}`}
+                    referrerPolicy="no-referrer"
+                    className="max-h-full max-w-full object-contain"
+                  />
+                </div>
+
+                {/* Per-Photo Indikator & Rencana Aksi */}
+                <div
+                  className="border-t border-slate-200 bg-white shrink-0"
+                  style={{ padding: `${6 * zoom}px ${8 * zoom}px` }}
+                >
+                  <div
+                    className="font-bold text-[#0F4C81] truncate"
+                    style={{ fontSize: `${8.8 * zoom}px`, lineHeight: 1.3 }}
+                    title={`Indikator: ${itemIndicator}`}
+                  >
+                    Indikator: {itemIndicator}
+                  </div>
+                  <div
+                    className="font-medium text-slate-700 truncate"
+                    style={{
+                      fontSize: `${8.4 * zoom}px`,
+                      marginTop: `${1.5 * zoom}px`,
+                      lineHeight: 1.3,
+                    }}
+                    title={`Rencana Aksi: ${itemActionPlan}`}
+                  >
+                    Rencana Aksi: {itemActionPlan}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {renderPageFooter(page.pageNumber, page.totalPages)}
@@ -370,7 +392,7 @@ export function DocumentPreview({
 
   const renderEmptyMonthPage = (page: Extract<F4Page, { type: 'month-empty' }>) => (
     <div className="flex flex-col h-full">
-      {renderPageHeader(page.month.name, page.indicator)}
+      {renderPageHeader(page.month.name)}
 
       <div
         className="border border-slate-300 bg-slate-50 text-center"

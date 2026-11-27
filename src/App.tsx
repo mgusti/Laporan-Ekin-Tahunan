@@ -288,25 +288,9 @@ export default function App() {
           };
         });
 
-        // Ensure all photos in the same year, month & indicator share the newly provided Rencana Aksi
-        const actionPlanByYearMonthInd = new Map<string, string>();
-        for (const c of created) {
-          if (c.description?.trim()) {
-            const ind = (c.indicator ?? '').trim() || DEFAULT_INDICATOR;
-            actionPlanByYearMonthInd.set(`${c.year}:::${c.month}:::${ind}`, c.description.trim());
-          }
-        }
-
-        const updatedExisting = prev.items.map((item) => {
-          const itemYear = Number(item.year) || 2026;
-          const ind = (item.indicator ?? '').trim() || DEFAULT_INDICATOR;
-          const sharedPlan = actionPlanByYearMonthInd.get(`${itemYear}:::${item.month}:::${ind}`);
-          return sharedPlan ? { ...item, description: sharedPlan } : item;
-        });
-
         return {
           ...prev,
-          items: [...updatedExisting, ...created],
+          items: [...prev.items, ...created],
         };
       });
     },

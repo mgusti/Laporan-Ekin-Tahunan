@@ -81,20 +81,6 @@ export function MonthEditor({
     selectedIndicator === ALL_INDICATORS
       ? indicators[0] || DEFAULT_INDICATOR
       : selectedIndicator.trim() || DEFAULT_INDICATOR;
-  const lockedMonthActionPlan =
-    items
-      .find(
-        (i) =>
-          ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === activeIndicatorClean &&
-          Boolean(i.description?.trim())
-      )
-      ?.description?.trim() ?? '';
-  const isMonthActionPlanLocked = Boolean(lockedMonthActionPlan);
-
-  // Pre-fill Rencana Aksi from existing items in this month & active indicator when switching month/indicator or when items change
-  useEffect(() => {
-    setDraftDesc(lockedMonthActionPlan);
-  }, [monthIndex, activeIndicatorClean, lockedMonthActionPlan]);
 
   const selectedDraftMonth = MONTHS.find((m) => m.index === draftMonth) ?? currentMonth;
 
@@ -179,7 +165,7 @@ export function MonthEditor({
       setErrorMsg('Silakan pilih atau seret foto bukti dukung terlebih dahulu.');
       return;
     }
-    const finalActionPlan = (isMonthActionPlanLocked ? lockedMonthActionPlan : draftDesc).trim();
+    const finalActionPlan = draftDesc.trim();
     if (!finalActionPlan) {
       setErrorMsg('Rencana Aksi wajib diisi.');
       return;
@@ -211,6 +197,7 @@ export function MonthEditor({
     const savedCount = prepared.length;
     onAddItems(prepared);
     setDraftTitle('');
+    setDraftDesc('');
     setDraftPhotos([]);
     setLastUploadedCount(savedCount);
     setErrorMsg(null);
@@ -459,44 +446,26 @@ export function MonthEditor({
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label
-                  htmlFor="draft-desc"
-                  className="block text-xs font-semibold text-slate-700"
-                >
-                  Rencana Aksi <span className="text-rose-600">*</span>
-                </label>
-                {isMonthActionPlanLocked && (
-                  <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                    <Lock className="h-3 w-3 text-slate-500" />
-                    <span>Terkunci untuk bulan {selectedDraftMonth.name}</span>
-                  </span>
-                )}
-              </div>
+              <label
+                htmlFor="draft-desc"
+                className="block text-xs font-semibold text-slate-700 mb-1.5"
+              >
+                Rencana Aksi <span className="text-rose-600">*</span>
+              </label>
               <input
                 id="draft-desc"
                 type="text"
                 required
-                readOnly={isMonthActionPlanLocked}
-                disabled={isMonthActionPlanLocked}
-                value={isMonthActionPlanLocked ? lockedMonthActionPlan : draftDesc}
+                value={draftDesc}
                 onChange={(e) => {
-                  if (isMonthActionPlanLocked) return;
-                  const val = e.target.value;
-                  setDraftDesc(val);
+                  setDraftDesc(e.target.value);
                   if (errorMsg) setErrorMsg(null);
                 }}
-                placeholder="Masukkan rencana aksi untuk semua foto di bulan ini"
-                className={`w-full rounded-lg border px-3.5 py-2.5 text-sm ${
-                  isMonthActionPlanLocked
-                    ? 'border-slate-200 bg-slate-100 text-slate-600 cursor-not-allowed select-none'
-                    : 'border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-700/20'
-                }`}
+                placeholder="Masukkan rencana aksi untuk foto yang diunggah ini"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-700/20"
               />
               <p className="mt-1 text-[11px] text-slate-500">
-                {isMonthActionPlanLocked
-                  ? `Rencana Aksi bulan ${selectedDraftMonth.name} sudah diinput dan dikunci otomatis untuk seluruh foto di bulan ini.`
-                  : `Rencana Aksi ini berlaku untuk seluruh foto bukti dukung pada bulan ${selectedDraftMonth.name} dan akan dikunci setelah diinput.`}
+                1 Indikator Kinerja dapat memiliki beberapa Rencana Aksi yang berbeda.
               </p>
             </div>
 

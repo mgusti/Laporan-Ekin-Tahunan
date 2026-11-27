@@ -74,11 +74,9 @@ export type F4Page =
       pageNumber: number;
       totalPages: number;
       month: MonthDefinition;
-      indicator: string;
       monthPageIndex: number;
       monthTotalPages: number;
       startItemNumber: number;
-      actionPlan: string;
       items: EvidenceItem[];
     }
   | {
@@ -86,7 +84,6 @@ export type F4Page =
       pageNumber: number;
       totalPages: number;
       month: MonthDefinition;
-      indicator: string;
     };
 
 export function groupItemsByMonth(items: EvidenceItem[]): Map<number, EvidenceItem[]> {
@@ -128,9 +125,6 @@ export function buildAnnualPages(metadata: ReportMetadata, items: EvidenceItem[]
         rawPages.push({
           type: 'month-empty',
           month,
-          indicator: isAllIndicators
-            ? 'Semua Indikator'
-            : metadata.selectedIndicator.trim() || DEFAULT_INDICATOR,
         });
         currentPageCursor += 1;
       }
@@ -140,6 +134,8 @@ export function buildAnnualPages(metadata: ReportMetadata, items: EvidenceItem[]
     const perPage = metadata.photosPerPage;
     const startPage = currentPageCursor;
 
+    // Order items by indicator sequence when printing all indicators so related photos stay adjacent while sharing pages
+    let orderedMonthItems = monthItems;
     if (isAllIndicators) {
       const indicatorOrder = [...metadata.indicators];
       for (const item of monthItems) {
@@ -148,53 +144,29 @@ export function buildAnnualPages(metadata: ReportMetadata, items: EvidenceItem[]
           indicatorOrder.push(ind);
         }
       }
-      const activeIndicators = indicatorOrder.filter((ind) =>
-        monthItems.some((i) => ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === ind)
-      );
+      orderedMonthItems = [...monthItems].sort((a, b) => {
+        const indA = (a.indicator ?? '').trim() || DEFAULT_INDICATOR;
+        const indB = (b.indicator ?? '').trim() || DEFAULT_INDICATOR;
+        const idxA = indicatorOrder.indexOf(indA);
+        const idxB = indicatorOrder.indexOf(indB);
+        if (idxA !== idxB) return idxA - idxB;
+        return a.order - b.order || a.createdAt - b.createdAt;
+      });
+    }
 
-      for (const ind of activeIndicators) {
-        const indItems = monthItems.filter(
-          (i) => ((i.indicator ?? '').trim() || DEFAULT_INDICATOR) === ind
-        );
-        const indTotalPages = Math.ceil(indItems.length / perPage);
-        const indActionPlan =
-          indItems.find((i) => i.description?.trim())?.description?.trim() ?? '';
+    const monthTotalPages = Math.ceil(orderedMonthItems.length / perPage);
 
-        for (let i = 0; i < indTotalPages; i++) {
-          const slice = indItems.slice(i * perPage, (i + 1) * perPage);
-          rawPages.push({
-            type: 'month-photos',
-            month,
-            indicator: ind,
-            monthPageIndex: i + 1,
-            monthTotalPages: indTotalPages,
-            startItemNumber: i * perPage + 1,
-            actionPlan: indActionPlan,
-            items: slice,
-          });
-          currentPageCursor += 1;
-        }
-      }
-    } else {
-      const targetIndicator = metadata.selectedIndicator.trim() || DEFAULT_INDICATOR;
-      const monthTotalPages = Math.ceil(monthItems.length / perPage);
-      const monthActionPlan =
-        monthItems.find((i) => i.description?.trim())?.description?.trim() ?? '';
-
-      for (let i = 0; i < monthTotalPages; i++) {
-        const slice = monthItems.slice(i * perPage, (i + 1) * perPage);
-        rawPages.push({
-          type: 'month-photos',
-          month,
-          indicator: targetIndicator,
-          monthPageIndex: i + 1,
-          monthTotalPages,
-          startItemNumber: i * perPage + 1,
-          actionPlan: monthActionPlan,
-          items: slice,
-        });
-        currentPageCursor += 1;
-      }
+    for (let i = 0; i < monthTotalPages; i++) {
+      const slice = orderedMonthItems.slice(i * perPage, (i + 1) * perPage);
+      rawPages.push({
+        type: 'month-photos',
+        month,
+        monthPageIndex: i + 1,
+        monthTotalPages,
+        startItemNumber: i * perPage + 1,
+        items: slice,
+      });
+      currentPageCursor += 1;
     }
 
     monthPageRanges.set(month.index, { start: startPage, end: currentPageCursor - 1 });
